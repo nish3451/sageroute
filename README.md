@@ -98,6 +98,41 @@ export OPENAI_MODEL=sageroute
 
 Nothing else changes. The harness thinks it is talking to one model. It is talking to a ladder.
 
+### Subscription OAuth
+
+SageRoute can also authenticate OpenAI and Anthropic providers with an existing ChatGPT Plus/Pro or Claude Pro/Max subscription login instead of a metered API key.
+
+```bash
+sageroute auth login openai
+sageroute auth login anthropic
+sageroute auth status
+```
+
+Then set that provider to `authMode: "oauth"` and remove `apiKey` from the provider config:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "authMode": "oauth",
+      "models": ["gpt-5-codex"]
+    },
+    "anthropic": {
+      "adapter": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "authMode": "oauth",
+      "models": ["claude-sonnet-4-5-20250929"]
+    }
+  }
+}
+```
+
+Credentials are stored in `~/.sageroute/auth.json` with a `0700` directory and `0600` file. Expired access tokens refresh automatically before an upstream request; if no valid login is available, the proxy returns a 401 with the exact `sageroute auth login <provider>` command and does not call upstream.
+
+A subscription OAuth token is not a general API credential. It is accepted only when the request looks like the vendor's first-party client. For ChatGPT, configure `https://chatgpt.com/backend-api/codex`; SageRoute sends the stored `ChatGPT-Account-Id` when the login exposes one, pins `store: false`, and strips stored item ids while preserving `call_id` tool pairing. For Anthropic, SageRoute sends bearer auth, the OAuth beta and Claude Code fingerprint headers, and makes the first system block the Claude Code identity while preserving the caller's system prompt as a later block.
+
 ### Docker
 
 ```bash
@@ -294,6 +329,8 @@ Early, but real and running. What is proven: the decision engine, the proxy tran
 What is **not** yet proven, stated plainly:
 
 - The live proof uses a **stub upstream**, so it validates routing behavior, not real model quality deltas. Measuring actual task outcomes and dollar savings against two real models is the next step.
+- The OAuth flows were verified against the vendors' documented protocols and end to end against stub vendor servers over real sockets, including the credential store, expiry/refresh behavior, and exact upstream request shaping. A real interactive `auth login` against live ChatGPT or Anthropic servers has not been executed in this environment.
+- Subscription terms of service are the user's responsibility.
 - Thresholds and the intervention gate default were chosen by reasoning and small-scale testing, not by tuning on a large benchmark.
 - Session state is in-memory and per-process. A multi-replica deployment will route each replica independently.
 - Not battle-tested at scale.

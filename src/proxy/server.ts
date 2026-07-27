@@ -26,7 +26,9 @@ import {
 } from "../core";
 import type { LoadedConfig, ProviderConfig } from "./config";
 import { resolveSecret } from "./config";
-import { dispatchUpstream } from "./upstream";
+import { dispatchUpstream, type UpstreamCredential } from "./upstream";
+import { getValidAccessToken, loadCredentials, OAuthError } from "../oauth";
+import type { OAuthProviderId } from "../oauth";
 
 export interface ServerOptions {
   config: LoadedConfig;
@@ -78,6 +80,26 @@ export function resolveTarget(ref: string, providers: Record<string, ProviderCon
 }
 
 /** Synthesize the assistant turn that carries a human-escalation notice. */
+/**
+ * Resolve the credential one provider should authenticate with.
+ *
+ * In `oauth` mode the stored login is the source of truth and is refreshed on demand, so
+ * a long agent run does not die mid-trajectory on an expired access token. The account id
+ * is read alongside it because the ChatGPT backend requires it on every call.
+ */
+export async function credentialFor(
+  name: string,
+  config: ProviderConfig,
+): Promise<UpstreamCredential> {
+  if ((config.authMode ?? "key") !== "oauth") {
+    return { mode: "key", apiKey: resolveSecret(config.apiKey) ?? null };
+  }
+  const provider = (config.oauthProvider ?? name) as OAuthProviderId;
+  const token = await getValidAccessToken(provider);
+  const stored = await loadCredentials(provider);
+  return { mode: "oauth", provider, token, accountId: stored?.accountId };
+}
+
 function escalationResponse(notice: string, model: string, stream: boolean): Response {
   const body = {
     id: `resp_${Date.now().toString(36)}`,
@@ -282,11 +304,19 @@ export class SageRouteProxy {
     stream: boolean,
     onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void,
   ): Promise<Response> {
-    const apiKey = resolveSecret(target.config.apiKey) ?? null;
+    let credential: UpstreamCredential;
+    try {
+      credential = await credentialFor(target.provider, target.config);
+    } catch (err) {
+      // A missing or unrefreshable login is an operator problem, not an upstream fault,
+      // and the message carries the exact command that fixes it.
+      if (err instanceof OAuthError) return errorResponse(err.message, 401, "authentication_error");
+      throw err;
+    }
     try {
       const result = await dispatchUpstream(
         { provider: target.provider, config: target.config, model: target.model, body, stream },
-        apiKey,
+        credential,
         this.options.fetchImpl,
       );
       if (onUsage) void result.usage.then(onUsage);

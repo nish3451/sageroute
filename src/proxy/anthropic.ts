@@ -15,6 +15,7 @@
  */
 
 import type { TurnUsage } from "./upstream";
+import { CLAUDE_CODE_SYSTEM_INSTRUCTION } from "../oauth";
 
 /** Anthropic rejects a request without this, so the adapter always sends one. */
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192;
@@ -174,6 +175,35 @@ export function responsesToAnthropic(
   }
 
   return request;
+}
+
+/**
+ * Reshape a Messages request so it presents as Claude Code.
+ *
+ * An Anthropic OAuth token is scoped to Claude Code rather than to the general API, and
+ * the vendor checks the request against that scope. The first system block has to be the
+ * Claude Code identity string exactly; the caller's own system prompt is preserved as a
+ * second block rather than replaced, so routing does not silently discard instructions.
+ *
+ * `system` therefore becomes a block array here even though the key-mode path sends a
+ * plain string. Both shapes are valid for Anthropic.
+ */
+export function applyClaudeCodeIdentity(request: Record<string, unknown>): Record<string, unknown> {
+  const identity = { type: "text", text: CLAUDE_CODE_SYSTEM_INSTRUCTION };
+  const existing = request.system;
+
+  const blocks: Array<Record<string, unknown>> = [identity];
+  if (typeof existing === "string" && existing.trim()) {
+    blocks.push({ type: "text", text: existing });
+  } else if (Array.isArray(existing)) {
+    for (const block of existing) {
+      // Guard against double-prefixing if this request was already shaped.
+      if (isObj(block) && block.type === "text" && block.text === CLAUDE_CODE_SYSTEM_INSTRUCTION) continue;
+      blocks.push(isObj(block) ? block : { type: "text", text: flatten(block) });
+    }
+  }
+
+  return { ...request, system: blocks };
 }
 
 /** Translate an Anthropic Messages reply back into the Responses envelope. */

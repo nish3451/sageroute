@@ -18,9 +18,54 @@ import {
   ANTHROPIC_VERSION,
   anthropicStreamToResponses,
   anthropicToResponses,
+  applyClaudeCodeIdentity,
   readAnthropicUsage,
   responsesToAnthropic,
 } from "./anthropic";
+import {
+  CLAUDE_CODE_HEADERS,
+  claudeCodeSessionId,
+  SAGEROUTE_ORIGINATOR,
+} from "./fingerprint";
+import { ANTHROPIC_OAUTH_BETA, type OAuthProviderId } from "../oauth";
+
+/**
+ * How one upstream call authenticates.
+ *
+ * These are not interchangeable secrets. A `key` is a metered API credential, while an
+ * `oauth` token is a subscription credential issued to a specific first-party client,
+ * which changes the headers AND the request body the vendor will accept.
+ */
+export type UpstreamCredential =
+  | { mode: "key"; apiKey: string | null }
+  | { mode: "oauth"; provider: OAuthProviderId; token: string; accountId?: string };
+
+/** Callers that only have an API key can still pass a bare string or null. */
+export type CredentialInput = string | null | UpstreamCredential;
+
+function normalizeCredential(input: CredentialInput): UpstreamCredential {
+  if (input === null || typeof input === "string") return { mode: "key", apiKey: input };
+  return input;
+}
+
+/**
+ * Prepare a Responses body for the ChatGPT subscription backend.
+ *
+ * That backend does not persist response items for a subscription caller, so `store` is
+ * pinned false. Item ids in `input` then refer to stored objects that were never created
+ * and the request 404s, so they are stripped. `call_id` is untouched: it is what pairs a
+ * tool call to its output, and the router's evidence layer reads exactly those pairs.
+ */
+export function withoutStoredItemIds(body: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...body, store: false };
+  if (!Array.isArray(next.input)) return next;
+  next.input = next.input.map(item => {
+    if (!isObj(item) || !("id" in item)) return item;
+    const { id: _id, ...rest } = item;
+    return rest;
+  });
+  return next;
+}
 
 export interface TurnUsage {
   inputTokens: number;
@@ -209,18 +254,37 @@ export function chatToResponses(raw: unknown, model: string): Record<string, unk
   };
 }
 
-function headersFor(provider: ProviderConfig, apiKey: string | null): Headers {
+export function headersFor(provider: ProviderConfig, credential: CredentialInput): Headers {
   const headers = new Headers({ "Content-Type": "application/json" });
   const adapter = provider.adapter ?? "openai-responses";
-  if (apiKey) {
-    if (adapter === "anthropic-messages") {
-      // Anthropic authenticates on its own header and rejects a bare bearer token.
-      headers.set("x-api-key", apiKey);
+  const isAnthropic = adapter === "anthropic-messages";
+  const cred = normalizeCredential(credential);
+
+  if (cred.mode === "oauth") {
+    // A subscription token is a bearer token for every vendor, including Anthropic,
+    // which otherwise authenticates on x-api-key.
+    headers.set("Authorization", `Bearer ${cred.token}`);
+    if (cred.provider === "anthropic") {
+      headers.set("anthropic-beta", ANTHROPIC_OAUTH_BETA);
+      for (const [key, value] of Object.entries(CLAUDE_CODE_HEADERS)) headers.set(key, value);
+      headers.set("X-Claude-Code-Session-Id", claudeCodeSessionId(cred.token));
+      headers.set("x-client-request-id", crypto.randomUUID());
     } else {
-      headers.set("Authorization", `Bearer ${apiKey}`);
+      // The ChatGPT backend scopes a token to one account and rejects the call without it.
+      if (cred.accountId) headers.set("ChatGPT-Account-Id", cred.accountId);
+      headers.set("originator", SAGEROUTE_ORIGINATOR);
+      headers.set("session_id", crypto.randomUUID());
+    }
+  } else if (cred.apiKey) {
+    if (isAnthropic) {
+      // Anthropic authenticates on its own header and rejects a bare bearer token.
+      headers.set("x-api-key", cred.apiKey);
+    } else {
+      headers.set("Authorization", `Bearer ${cred.apiKey}`);
     }
   }
-  if (adapter === "anthropic-messages") headers.set("anthropic-version", ANTHROPIC_VERSION);
+
+  if (isAnthropic) headers.set("anthropic-version", ANTHROPIC_VERSION);
   for (const [key, value] of Object.entries(provider.headers ?? {})) headers.set(key, value);
   return headers;
 }
@@ -357,7 +421,7 @@ function chatStreamToResponses(
  */
 export async function dispatchUpstream(
   request: UpstreamRequest,
-  apiKey: string | null,
+  credential: CredentialInput,
   fetchImpl: typeof fetch = fetch,
 ): Promise<UpstreamResult> {
   const adapter = request.config.adapter ?? "openai-responses";
@@ -365,9 +429,13 @@ export async function dispatchUpstream(
   const isChat = adapter === "openai-chat";
   const isAnthropic = adapter === "anthropic-messages";
   const url = `${base}${isAnthropic ? "/messages" : isChat ? "/chat/completions" : "/responses"}`;
+  const cred = normalizeCredential(credential);
+  const isOAuth = cred.mode === "oauth";
   let payload: Record<string, unknown>;
   if (isAnthropic) {
     payload = responsesToAnthropic(request.body, request.model);
+    // An Anthropic OAuth token is scoped to Claude Code, so the body must present as it.
+    if (isOAuth) payload = applyClaudeCodeIdentity(payload);
   } else if (isChat) {
     // A caller that already sent a native Chat body is passed through untouched;
     // translating it would drop `messages` on the floor.
@@ -376,6 +444,9 @@ export async function dispatchUpstream(
       : responsesToChat(request.body, request.model);
   } else {
     payload = { ...request.body, model: request.model };
+    // The ChatGPT backend does not persist response items for a subscription caller, so
+    // forwarded item ids would reference stored objects that do not exist and 404.
+    if (isOAuth) payload = withoutStoredItemIds(payload);
   }
 
   const controller = new AbortController();
@@ -388,7 +459,7 @@ export async function dispatchUpstream(
   try {
     upstream = await fetchImpl(url, {
       method: "POST",
-      headers: headersFor(request.config, apiKey),
+      headers: headersFor(request.config, cred),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

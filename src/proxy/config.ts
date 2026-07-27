@@ -28,6 +28,23 @@ export const UPSTREAM_ADAPTERS: readonly UpstreamAdapter[] = [
   "anthropic-messages",
 ];
 
+/**
+ * How a provider authenticates.
+ *
+ * `key` is a pay-per-token API key from config. `oauth` uses a subscription login stored
+ * in `~/.sageroute/auth.json`, so a ChatGPT Plus/Pro or Claude Pro/Max plan can back a
+ * ladder tier instead of metered API billing.
+ *
+ * The distinction reaches further than the header. A subscription token is issued to a
+ * specific first-party client and the vendor validates that the request looks like it,
+ * so the Anthropic adapter also shapes the body and headers when this is `oauth`.
+ */
+export type ProviderAuthMode = "key" | "oauth";
+
+/** Providers with a login flow implemented. Others must use `key`. */
+export const OAUTH_PROVIDER_IDS = ["openai", "anthropic"] as const;
+export type OAuthProviderName = (typeof OAUTH_PROVIDER_IDS)[number];
+
 export interface ProviderConfig {
   /** Defaults to `openai-responses`, the format agent harnesses actually send. */
   adapter?: UpstreamAdapter;
@@ -35,6 +52,13 @@ export interface ProviderConfig {
   baseUrl: string;
   /** Supports `${VAR}`, `$VAR`, and `env:VAR` indirection. */
   apiKey?: string;
+  /** Defaults to `key`. See `ProviderAuthMode`. */
+  authMode?: ProviderAuthMode;
+  /**
+   * Which stored login to use when `authMode` is `oauth`. Defaults to the provider's own
+   * config key, so a provider named `openai` or `anthropic` needs no extra wiring.
+   */
+  oauthProvider?: OAuthProviderName;
   /** Extra headers merged into every upstream request. */
   headers?: Record<string, string>;
   /** Advertised on `/v1/models`. Purely cosmetic; routing uses the ladder. */
@@ -133,7 +157,32 @@ function providerIssues(
       message: `adapter must be one of ${UPSTREAM_ADAPTERS.map(a => `"${a}"`).join(", ")}`,
     });
   }
-  if (provider.apiKey !== undefined && resolveSecret(provider.apiKey) === undefined) {
+  const authMode = provider.authMode ?? "key";
+  if (provider.authMode !== undefined && authMode !== "key" && authMode !== "oauth") {
+    issues.push({
+      path: ["providers", name, "authMode"],
+      message: 'authMode must be "key" or "oauth"',
+    });
+  }
+
+  if (authMode === "oauth") {
+    const oauthProvider = provider.oauthProvider ?? name;
+    if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(oauthProvider)) {
+      issues.push({
+        path: ["providers", name, "oauthProvider"],
+        message: `no OAuth login flow for "${oauthProvider}"; supported: `
+          + `${OAUTH_PROVIDER_IDS.join(", ")}. Set oauthProvider, or use authMode "key".`,
+      });
+    }
+    // A stray apiKey next to authMode "oauth" is almost always a half-finished migration,
+    // and silently ignoring it would leave the user unsure which credential is in play.
+    if (provider.apiKey !== undefined) {
+      issues.push({
+        path: ["providers", name, "apiKey"],
+        message: 'apiKey is not used when authMode is "oauth"; remove it to avoid ambiguity',
+      });
+    }
+  } else if (provider.apiKey !== undefined && resolveSecret(provider.apiKey) === undefined) {
     issues.push({
       path: ["providers", name, "apiKey"],
       message: `apiKey references an environment variable that is not set: ${provider.apiKey}`,

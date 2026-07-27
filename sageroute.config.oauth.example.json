@@ -1,0 +1,42 @@
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "authMode": "oauth",
+      "models": ["gpt-5.4-mini", "gpt-5.6-sol"]
+    },
+    "anthropic": {
+      "adapter": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "authMode": "oauth",
+      "models": ["claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"]
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "inputPerMTok": 0,
+      "outputPerMTok": 0
+    },
+    "strong": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929",
+      "inputPerMTok": 0,
+      "outputPerMTok": 0
+    },
+    "apiKey": "${SAGE_API_KEY}",
+    "checkpointEvery": 3,
+    "firstCheckpointAt": 3,
+    "interventionThreshold": 0.6,
+    "consecutiveBadRequired": 2,
+    "maxSwitches": 1,
+    "maxRestarts": 1,
+    "escalateHumanMode": "notice"
+  }
+}

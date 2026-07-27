@@ -21,10 +21,33 @@ The CLI default config path is `./sageroute.config.json`, unless `SAGEROUTE_CONF
 | `adapter` | `"openai-responses" \| "openai-chat" \| "anthropic-messages"` | `"openai-responses"` | Wire format used for this provider. `openai-responses` sends to `/responses`, `openai-chat` sends to `/chat/completions`, and `anthropic-messages` sends to `/messages`. Non-Responses adapters convert provider input/output back to the Responses shape. |
 | `baseUrl` | `string` | Required | Provider base URL including the version segment, for example `https://api.openai.com/v1`. |
 | `apiKey` | `string \| undefined` | `null` when omitted at dispatch time | Optional provider credential. Supports secret indirection. If present, it must resolve to a value during config validation. |
+| `authMode` | `"key" \| "oauth" \| undefined` | `"key"` | Selects credential source. `key` uses `apiKey`; `oauth` uses a stored subscription login from `~/.sageroute/auth.json`. |
+| `oauthProvider` | `"openai" \| "anthropic" \| undefined` | The provider's config key | Stored login to use when `authMode` is `oauth`. A provider named `openai` or `anthropic` needs no extra wiring. Use this when the config key is different, for example `"chatgpt": { "authMode": "oauth", "oauthProvider": "openai" }`. |
 | `headers` | `Record<string, string> \| undefined` | `{}` | Extra headers merged into every upstream request. `dispatchUpstream()` also sets `Content-Type: application/json`. For `anthropic-messages`, a resolved API key is sent as `x-api-key` and `anthropic-version` is set. Other adapters send a resolved API key as `Authorization: Bearer <key>`. |
 | `models` | `string[] \| undefined` | `[]` for `/v1/models` output and bare-model lookup | Cosmetic model list advertised by `/v1/models`. Routing uses the SageRoute ladder, not this list. For passthrough requests, a bare model id can resolve through this list when multiple providers exist. |
 | `allowPrivateNetwork` | `boolean \| undefined` | Private-network URLs are refused unless this is `true` | Allows loopback and RFC1918 upstream `baseUrl` hosts. This guard exists because a credential-forwarding proxy can become an SSRF primitive. |
 | `timeoutMs` | `number \| undefined` | `600000` | Upstream request timeout in milliseconds. This default is in `src/proxy/upstream.ts` because agent turns can be long. There is no provider-level range validator in `proxyConfigIssues()`. |
+
+In `authMode: "oauth"`, do not set `apiKey`. Validation rejects that combination with `apiKey is not used when authMode is "oauth"; remove it to avoid ambiguity`.
+
+OAuth logins are stored at `~/.sageroute/auth.json`. The store directory is written with `0700` permissions and the file with `0600`. Access tokens refresh automatically five minutes before expiry, and concurrent refreshes for the same provider share one refresh request. If credentials are missing or cannot refresh, the proxy returns HTTP 401 with the exact `sageroute auth login <provider>` command and does not call upstream.
+
+Supported login providers are `openai` and `anthropic`.
+
+```bash
+sageroute auth login openai
+sageroute auth login anthropic
+sageroute auth logout openai
+sageroute auth logout anthropic
+sageroute auth status
+```
+
+A subscription OAuth token is not a general API credential. It is issued to a specific first-party client, and the vendor validates the request shape as well as the token:
+
+- OpenAI subscription tokens are for the ChatGPT Codex backend. Set `baseUrl` to `https://chatgpt.com/backend-api/codex`. SageRoute sends bearer auth, `ChatGPT-Account-Id` when it was present in the login, an originator header, and a session id. It also pins `store: false` and strips stored item `id` fields from Responses input while preserving `call_id`, because `call_id` is what pairs tool calls to tool outputs for the evidence layer.
+- Anthropic subscription tokens are scoped to Claude Code. SageRoute sends bearer auth instead of `x-api-key`, `anthropic-beta: claude-code-20250219,oauth-2025-04-20`, Claude Code fingerprint headers, `X-Claude-Code-Session-Id`, and `x-client-request-id`. It also makes the first system block exactly `You are a Claude agent, built on Anthropic's Claude Agent SDK.`. If the caller supplied a system prompt, it is preserved as a later system block.
+
+OAuth verification status: the flows were verified against the vendors' documented protocols and end to end against stub vendor servers over real sockets, including the credential store, expiry/refresh behavior, and exact on-the-wire request shaping. A real interactive `auth login` against live ChatGPT or Anthropic servers has not been executed in this environment. Subscription terms of service are the user's responsibility.
 
 ## `SageRouteConfig`
 
@@ -93,6 +116,9 @@ Provider `apiKey` values are validated when present: an unresolved env reference
 | `providers.<name>.baseUrl` | Private hosts require `allowPrivateNetwork: true`. | `baseUrl "<hostname>" is a private address; set allowPrivateNetwork: true to permit it` |
 | `providers.<name>.adapter` | If present, must be one of `openai-responses`, `openai-chat`, or `anthropic-messages`. | `adapter must be one of "openai-responses", "openai-chat", "anthropic-messages"` |
 | `providers.<name>.apiKey` | If present, must resolve through `resolveSecret()`. | `apiKey references an environment variable that is not set: <value>` |
+| `providers.<name>.authMode` | If present, must be `key` or `oauth`. | `authMode must be "key" or "oauth"` |
+| `providers.<name>.oauthProvider` | In `authMode: "oauth"`, must name a supported login provider. Defaults to the provider name. | `no OAuth login flow for "<provider>"; supported: openai, anthropic. Set oauthProvider, or use authMode "key".` |
+| `providers.<name>.apiKey` | Must be omitted in `authMode: "oauth"`. | `apiKey is not used when authMode is "oauth"; remove it to avoid ambiguity` |
 | `sageRoute` | Required. | `sageRoute is required; this proxy exists to route` |
 
 Private hosts matched by the guard are `localhost`, `127.*`, `0.0.0.0`, `10.*`, `192.168.*`, `169.254.*`, `::1`, and `172.16.*` through `172.31.*`.
@@ -212,6 +238,67 @@ This starts on an OpenAI Responses-compatible provider and escalates to a provid
 }
 ```
 
+### Subscription OAuth Ladder
+
+This uses stored subscription logins instead of provider API keys. Run the login commands first:
+
+```bash
+sageroute auth login openai
+sageroute auth login anthropic
+sageroute auth status
+```
+
+Then omit `apiKey` for every OAuth-backed provider:
+
+```json
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "authMode": "oauth",
+      "models": ["gpt-5-codex"]
+    },
+    "anthropic": {
+      "adapter": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "authMode": "oauth",
+      "models": ["claude-sonnet-4-5-20250929"]
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-5-codex"
+    },
+    "strong": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929"
+    },
+    "apiKey": "${LEVANTO_API_KEY}"
+  }
+}
+```
+
+If the config key is not the same as the stored login provider, set `oauthProvider` explicitly:
+
+```json
+{
+  "providers": {
+    "chatgpt": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "authMode": "oauth",
+      "oauthProvider": "openai"
+    }
+  }
+}
+```
+
 ### Locked-Down Deployment With Offline Decisions
 
 This binds to loopback, requires a bearer token, sets a budget cap, and uses the deterministic offline Sage stub. The upstream provider still needs its own API key because offline mode only replaces the Sage decision API.
@@ -269,6 +356,11 @@ Examples:
 ```text
 invalid SageRoute config:
   - providers.openai.apiKey: apiKey references an environment variable that is not set: ${OPENAI_API_KEY}
+```
+
+```text
+invalid SageRoute config:
+  - providers.openai.apiKey: apiKey is not used when authMode is "oauth"; remove it to avoid ambiguity
 ```
 
 ```text
