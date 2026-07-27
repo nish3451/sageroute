@@ -19,6 +19,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Session tracking, routing history, and cost ledger.
 - `sageroute serve` and `sageroute check` CLI commands.
 - `sageroute init` command that detects existing subscription logins and API keys, writes a config valid for the current machine, validates it immediately, and prints the resulting ladder plus the next command to run. Refuses to overwrite an existing config without `--force`.
+- First-run bootstrap in `sageroute serve`: with no config at the resolved path, the same generator `init` uses writes one, validates it, prints the ladder, and continues into the listener. An existing config is never overwritten, and a generated config that still needs a credential exits `1` with the missing variable named rather than listening in a state that would fail on the first request.
 - Hand-authored light and dark architecture diagrams in `docs/assets/`, embedded in the README through a `<picture>` element so both color schemes render on GitHub.
 - 120 tests across core routing, signals, evidence, sessions, config, config scaffolding, upstream dispatch, OAuth PKCE, the Anthropic adapter, and proxy endpoints.
 

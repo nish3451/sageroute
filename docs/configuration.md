@@ -4,6 +4,15 @@ SageRoute reads a JSON config file through `loadConfigFile()`, validates it with
 
 The CLI default config path is `./sageroute.config.json`, unless `SAGEROUTE_CONFIG` is set or `--config <path>` is passed.
 
+There is no required setup step before `serve`. If the config path does not exist, `serve`
+generates a config from the credentials on the machine, validates it, prints the ladder,
+and continues into the listener. `sageroute init` runs the same generator explicitly when
+you want to inspect or edit the file before booting.
+
+Bun loads a `.env` file from the working directory automatically, so `SAGE_API_KEY` and
+any provider keys can live there instead of being re-exported in every shell. `.env` is
+gitignored; `.env.example` documents the variables.
+
 ## Generating A Config With `init`
 
 `sageroute init` writes a config built around the credentials that already exist on the
@@ -37,6 +46,13 @@ Notes on the generated file:
 `init` refuses to overwrite an existing config and exits `1` unless `--force` is passed.
 After writing, it immediately loads the file through the same validator as `check`, so the
 ladder and the credential each tier resolves to are printed before you ever run `serve`.
+
+`serve`'s first-run bootstrap uses the same code path, so a generated config is identical
+either way. The bootstrap only triggers when the file is absent: an existing config that
+fails validation is still a hard error, because silently overwriting a config someone
+edited would be worse than refusing to start. When a generated config still needs a
+credential, `serve` prints what is missing and exits `1` rather than listening in a state
+that would fail on the first request.
 
 ## Top-Level `ProxyConfig`
 

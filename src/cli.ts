@@ -52,6 +52,7 @@ const USAGE = [
   "Usage:",
   "  sageroute init [--config <path>] [--force]",
   "  sageroute serve [--config <path>] [--port <n>] [--host <addr>]",
+  "                  generates a config on first run if none exists",
   "  sageroute check [--config <path>]",
   "  sageroute auth login <provider>",
   "  sageroute auth logout <provider>",
@@ -241,9 +242,7 @@ async function runAuthCommand(positional: string[]): Promise<void> {
  * actually exist and generates a matching ladder.
  */
 async function runInit(flags: Map<string, string>): Promise<void> {
-  const path = flags.get("config")
-    ?? process.env.SAGEROUTE_CONFIG
-    ?? "./sageroute.config.json";
+  const path = configPath(flags);
 
   if (existsSync(path) && !flags.has("force")) {
     process.stderr.write(
@@ -253,6 +252,18 @@ async function runInit(flags: Map<string, string>): Promise<void> {
     process.exit(1);
   }
 
+  const loaded = await writeGeneratedConfig(path);
+  if (loaded) process.stdout.write(nextSteps([]));
+}
+
+/**
+ * Generate, write, and validate a config, reporting what was produced.
+ *
+ * Returns the loaded config, or undefined when the generated file still needs a
+ * credential. Shared by `init` and by `serve`'s first-run bootstrap so both paths
+ * produce byte-identical files and identical explanations.
+ */
+async function writeGeneratedConfig(path: string): Promise<LoadedConfig | undefined> {
   const plan = planInit({ logins: await detectLogins(), env: process.env });
   writeFileSync(path, `${JSON.stringify(configFromPlan(plan), null, 2)}\n`, "utf8");
 
@@ -268,7 +279,7 @@ async function runInit(flags: Map<string, string>): Promise<void> {
     if (err instanceof ConfigError) {
       process.stdout.write(`\nconfig needs attention:\n${err.message}\n`);
       process.stdout.write(nextSteps(plan.notes));
-      return;
+      return undefined;
     }
     throw err;
   }
@@ -280,7 +291,14 @@ async function runInit(flags: Map<string, string>): Promise<void> {
     + `  strong  ${router.strong.provider}/${router.strong.model}${tierAuthSuffix(loaded, router.strong.provider)}\n`
     + `  sage    ${router.offline || !router.apiKey ? "offline stub (set SAGE_API_KEY for live decisions)" : router.endpoint}\n`,
   );
-  process.stdout.write(nextSteps(plan.notes));
+  return loaded;
+}
+
+/** The config path this invocation should use, in precedence order. */
+function configPath(flags: Map<string, string>): string {
+  return flags.get("config")
+    ?? process.env.SAGEROUTE_CONFIG
+    ?? "./sageroute.config.json";
 }
 
 /** Tell the user the shortest path from here to a running router. */
@@ -315,19 +333,31 @@ async function main(): Promise<void> {
     return;
   }
 
-  const path = flags.get("config")
-    ?? process.env.SAGEROUTE_CONFIG
-    ?? "./sageroute.config.json";
+  const path = configPath(flags);
 
-  let loaded;
-  try {
-    loaded = loadConfigFile(path);
-  } catch (err) {
-    if (err instanceof ConfigError) {
-      process.stderr.write(`${err.message}\n`);
-      process.exit(1);
+  // First run should not be a dead end. `serve` with no config generates one from the
+  // credentials on this machine instead of failing with a bare ENOENT that the user has
+  // to translate into a command themselves.
+  let loaded: LoadedConfig;
+  if (command === "serve" && !existsSync(path)) {
+    process.stdout.write(`no config at ${path}; generating one\n`);
+    const bootstrapped = await writeGeneratedConfig(path);
+    if (!bootstrapped) process.exit(1);
+    loaded = bootstrapped;
+    process.stdout.write("\n");
+  } else {
+    try {
+      loaded = loadConfigFile(path);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        process.stderr.write(`${err.message}\n`);
+        if (!existsSync(path)) {
+          process.stderr.write("Run `sageroute init` to generate one.\n");
+        }
+        process.exit(1);
+      }
+      throw err;
     }
-    throw err;
   }
 
   if (command === "check") {

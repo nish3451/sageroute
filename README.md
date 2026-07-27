@@ -69,16 +69,17 @@ bun install
 Requires [Bun](https://bun.sh) 1.1+.
 
 ```bash
-export SAGE_API_KEY=lv_...   # https://docs.levanto.ai/
-
-bun run init                 # detect credentials, write a working config
-bun run serve                # listens on 127.0.0.1:8787
+echo "SAGE_API_KEY=lv_..." > .env   # https://docs.levanto.ai/
+bun run serve                       # listens on 127.0.0.1:8787
 ```
 
-`init` looks at what you actually have, a subscription login or an API key, and writes a
-config built around it. Then it validates that config and prints the ladder it produced:
+That is the whole setup. There is no config file to copy or hand-edit: `serve` generates
+one on first run from the credentials that already exist on this machine, validates it,
+prints the ladder, and starts listening. Bun loads `.env` automatically, so the Sage key
+survives a new shell without re-exporting anything.
 
 ```text
+no config at ./sageroute.config.json; generating one
 wrote ./sageroute.config.json
   openai uses your stored ChatGPT subscription login
   anthropic uses your stored Claude subscription login
@@ -87,11 +88,14 @@ ladder
   cheap   openai/gpt-5.4-mini  [oauth subscription]
   strong  anthropic/claude-sonnet-4-5-20250929  [oauth subscription]
   sage    https://sage.levanto.ai
+
+sageroute listening on http://127.0.0.1:8787
 ```
 
 No credentials yet? Run `sageroute auth login anthropic` to use a Claude Pro/Max plan, or
-export `OPENAI_API_KEY`, then `bun run init --force`. Use `bun run check` any time to
-revalidate and see which credential each tier resolves to.
+put `OPENAI_API_KEY` in `.env`. Run `bun run init --force` to regenerate the config after
+adding credentials, and `bun run check` any time to see which credential each tier
+resolves to.
 
 Point any OpenAI-compatible client at it and ask for the router by name:
 
