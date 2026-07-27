@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement to SageRoute.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem being solved
+      description: What user, operator, or agent-routing problem would this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior you want SageRoute to add or change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other designs, policies, or deployment approaches did you consider?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area affected
+      description: Does this change affect routing policy, proxy transport, or both?
+      options:
+        - Decision policy
+        - Proxy transport
+        - Both policy and transport
+        - Not sure
+    validations:
+      required: true

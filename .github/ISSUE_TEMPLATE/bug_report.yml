@@ -1,0 +1,87 @@
+name: Bug report
+description: Report something that is broken or surprising in SageRoute.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the behavior you saw.
+      placeholder: SageRoute routed a turn differently than expected, returned an error, or failed config validation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the behavior you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: List the smallest set of steps that reproduces the issue.
+      placeholder: |
+        1. Create this config...
+        2. Run `bun run src/cli.ts serve --config ...`
+        3. Send a request to `/v1/responses`...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SageRoute version or commit
+      description: Paste the package version or commit you are running.
+      placeholder: "0.1.0 or a commit SHA"
+    validations:
+      required: true
+
+  - type: input
+    id: bun-version
+    attributes:
+      label: Bun version
+      description: Paste the output of `bun --version`.
+      placeholder: "1.3.8"
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Config with secrets redacted
+      description: Paste the relevant config. Replace API keys and bearer tokens with REDACTED.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: headers
+    attributes:
+      label: Relevant x-sageroute-* response headers
+      description: Paste any SageRoute response headers from the affected request.
+      placeholder: |
+        x-sageroute-model:
+        x-sageroute-tier:
+        x-sageroute-action:
+        x-sageroute-session:
+        x-sageroute-checkpoint:
+        x-sageroute-intervention:
+        x-sageroute-source:
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant proxy logs, upstream errors, or config validation output.
+      render: text
+    validations:
+      required: false

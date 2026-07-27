@@ -114,7 +114,21 @@ describe("proxy config validation", () => {
         cheap: { baseUrl: "https://cheap.upstream.test/v1", adapter: "bad-adapter" as never },
         strong: { baseUrl: "https://strong.upstream.test/v1" },
       },
-    }))).toContain('providers.cheap.adapter: adapter must be "openai-responses" or "openai-chat"');
+    }))).toContain(
+      'providers.cheap.adapter: adapter must be one of '
+      + '"openai-responses", "openai-chat", "anthropic-messages"',
+    );
+  });
+
+  test("accepts every supported upstream adapter", () => {
+    for (const adapter of ["openai-responses", "openai-chat", "anthropic-messages"] as const) {
+      expect(proxyConfigIssues(validConfig({
+        providers: {
+          cheap: { baseUrl: "https://cheap.upstream.test/v1", adapter },
+          strong: { baseUrl: "https://strong.upstream.test/v1" },
+        },
+      }))).toEqual([]);
+    }
   });
 
   test("rejects unset apiKey environment references", () => {

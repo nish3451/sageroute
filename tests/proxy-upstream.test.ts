@@ -185,7 +185,9 @@ describe("dispatchUpstream", () => {
     expect(seenUrl).toBe("https://upstream.test/v1/responses");
     expect(seenInit?.method).toBe("POST");
     expect(new Headers(seenInit?.headers).get("authorization")).toBe("Bearer runtime-key");
-    expect(new Headers(seenInit?.headers).get("x-api-key")).toBe("runtime-key");
+    // OpenAI-shaped upstreams authenticate on the bearer header only; `x-api-key`
+    // belongs to the Anthropic adapter and must not leak the key to other vendors.
+    expect(new Headers(seenInit?.headers).get("x-api-key")).toBeNull();
     expect(JSON.parse(String(seenInit?.body))).toMatchObject({ model: "gpt-cheap", input: "hello" });
     expect(body).toMatchObject({ id: "resp_1", model: "gpt-cheap" });
     expect(await result.usage).toEqual({ inputTokens: 33, outputTokens: 12 });

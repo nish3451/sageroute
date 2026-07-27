@@ -14,6 +14,13 @@
  */
 
 import type { ProviderConfig } from "./config";
+import {
+  ANTHROPIC_VERSION,
+  anthropicStreamToResponses,
+  anthropicToResponses,
+  readAnthropicUsage,
+  responsesToAnthropic,
+} from "./anthropic";
 
 export interface TurnUsage {
   inputTokens: number;
@@ -204,11 +211,16 @@ export function chatToResponses(raw: unknown, model: string): Record<string, unk
 
 function headersFor(provider: ProviderConfig, apiKey: string | null): Headers {
   const headers = new Headers({ "Content-Type": "application/json" });
+  const adapter = provider.adapter ?? "openai-responses";
   if (apiKey) {
-    headers.set("Authorization", `Bearer ${apiKey}`);
-    // Anthropic-compatible gateways read the key from their own header.
-    headers.set("x-api-key", apiKey);
+    if (adapter === "anthropic-messages") {
+      // Anthropic authenticates on its own header and rejects a bare bearer token.
+      headers.set("x-api-key", apiKey);
+    } else {
+      headers.set("Authorization", `Bearer ${apiKey}`);
+    }
   }
+  if (adapter === "anthropic-messages") headers.set("anthropic-version", ANTHROPIC_VERSION);
   for (const [key, value] of Object.entries(provider.headers ?? {})) headers.set(key, value);
   return headers;
 }
@@ -351,12 +363,20 @@ export async function dispatchUpstream(
   const adapter = request.config.adapter ?? "openai-responses";
   const base = request.config.baseUrl.replace(/\/+$/, "");
   const isChat = adapter === "openai-chat";
-  const url = `${base}${isChat ? "/chat/completions" : "/responses"}`;
-  const payload = isChat
-    ? Array.isArray(request.body.messages)
+  const isAnthropic = adapter === "anthropic-messages";
+  const url = `${base}${isAnthropic ? "/messages" : isChat ? "/chat/completions" : "/responses"}`;
+  let payload: Record<string, unknown>;
+  if (isAnthropic) {
+    payload = responsesToAnthropic(request.body, request.model);
+  } else if (isChat) {
+    // A caller that already sent a native Chat body is passed through untouched;
+    // translating it would drop `messages` on the floor.
+    payload = Array.isArray(request.body.messages)
       ? { ...request.body, model: request.model }
-      : responsesToChat(request.body, request.model)
-    : { ...request.body, model: request.model };
+      : responsesToChat(request.body, request.model);
+  } else {
+    payload = { ...request.body, model: request.model };
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), request.config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -395,9 +415,12 @@ export async function dispatchUpstream(
     && (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
 
   if (streaming) {
-    const body = isChat
-      ? chatStreamToResponses(upstream.body!, request.model, u => { clearTimeout(timer); settle(u); })
-      : meterStream(upstream.body!, u => { clearTimeout(timer); settle(u); });
+    const done = (u: TurnUsage): void => { clearTimeout(timer); settle(u); };
+    const body = isAnthropic
+      ? anthropicStreamToResponses(upstream.body!, request.model, done)
+      : isChat
+        ? chatStreamToResponses(upstream.body!, request.model, done)
+        : meterStream(upstream.body!, done);
     return {
       response: new Response(body, {
         status: 200,
@@ -413,9 +436,12 @@ export async function dispatchUpstream(
 
   const decoded = await upstream.json().catch(() => ({}));
   clearTimeout(timer);
-  const measured = readUsage(decoded) ?? { inputTokens: 0, outputTokens: 0 };
+  const measured = (isAnthropic ? readAnthropicUsage(decoded) : readUsage(decoded))
+    ?? { inputTokens: 0, outputTokens: 0 };
   settle(measured);
-  const outBody = isChat ? chatToResponses(decoded, request.model) : decoded;
+  const outBody = isAnthropic
+    ? anthropicToResponses(decoded, request.model)
+    : isChat ? chatToResponses(decoded, request.model) : decoded;
   return {
     response: new Response(JSON.stringify(outBody), {
       status: 200,

@@ -1,0 +1,20 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
+
+## [0.1.0] - 2026-07-27
+
+### Added
+
+- Initial trajectory-aware routing engine for the `sageroute` model alias.
+- Two-stage Sage gate using intervention detection followed by action selection.
+- Guardrails for local budget stops, capability-before-retry, asymmetric hysteresis, one-way ladder behavior, and fail-open Sage outages.
+- OpenAI-compatible proxy with Responses routing and Chat Completions passthrough and adapter support.
+- Provider support for OpenAI, Anthropic, xAI, and Kimi (Moonshot) through three upstream adapters: `openai-responses`, `openai-chat`, and `anthropic-messages`.
+- Native Anthropic Messages adapter handling top-level `system`, required `max_tokens`, tool calls and results as content blocks, consecutive same-role message merging, and the typed streaming event protocol.
+- Streaming usage metering through SSE stream teeing, including Anthropic token counts split across the `message_start` and `message_delta` frames.
+- Session tracking, routing history, and cost ledger.
+- `sageroute serve` and `sageroute check` CLI commands.
+- 84 tests across core routing, signals, evidence, sessions, config, upstream dispatch, the Anthropic adapter, and proxy endpoints.

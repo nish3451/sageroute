@@ -9,10 +9,22 @@
       "models": ["gpt-4.1-mini", "gpt-4.1"]
     },
     "anthropic": {
-      "adapter": "openai-chat",
+      "adapter": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com/v1",
       "apiKey": "${ANTHROPIC_API_KEY}",
-      "models": ["claude-sonnet-4-20250514"]
+      "models": ["claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"]
+    },
+    "xai": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.x.ai/v1",
+      "apiKey": "${XAI_API_KEY}",
+      "models": ["grok-4.3", "grok-4.5"]
+    },
+    "kimi": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "apiKey": "${KIMI_API_KEY}",
+      "models": ["kimi-k2.5", "kimi-k2.6"]
     }
   },
   "sageRoute": {

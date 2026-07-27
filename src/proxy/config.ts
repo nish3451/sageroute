@@ -12,8 +12,21 @@ import { readFileSync } from "node:fs";
 import { sageRouteConfigIssues, type SageRouteValidationIssue } from "../core/resolve";
 import { resolveSageRouteConfig, type ResolvedSageRouteConfig, type SageRouteConfig } from "../core/types";
 
-/** Wire formats SageRoute knows how to speak to an upstream. */
-export type UpstreamAdapter = "openai-responses" | "openai-chat";
+/**
+ * Wire formats SageRoute knows how to speak to an upstream.
+ *
+ * `openai-responses` is the native agent-harness format. `openai-chat` covers the large
+ * set of vendors that expose an OpenAI-compatible Chat Completions endpoint (xAI, Kimi,
+ * and most gateways). `anthropic-messages` is the one supported vendor whose wire format
+ * genuinely differs, so it gets a real adapter rather than a base-URL swap.
+ */
+export type UpstreamAdapter = "openai-responses" | "openai-chat" | "anthropic-messages";
+
+export const UPSTREAM_ADAPTERS: readonly UpstreamAdapter[] = [
+  "openai-responses",
+  "openai-chat",
+  "anthropic-messages",
+];
 
 export interface ProviderConfig {
   /** Defaults to `openai-responses`, the format agent harnesses actually send. */
@@ -114,11 +127,10 @@ function providerIssues(
     });
   }
   if (provider.adapter !== undefined
-    && provider.adapter !== "openai-responses"
-    && provider.adapter !== "openai-chat") {
+    && !(UPSTREAM_ADAPTERS as readonly string[]).includes(provider.adapter)) {
     issues.push({
       path: ["providers", name, "adapter"],
-      message: 'adapter must be "openai-responses" or "openai-chat"',
+      message: `adapter must be one of ${UPSTREAM_ADAPTERS.map(a => `"${a}"`).join(", ")}`,
     });
   }
   if (provider.apiKey !== undefined && resolveSecret(provider.apiKey) === undefined) {

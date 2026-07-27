@@ -1,0 +1,305 @@
+# Configuration
+
+SageRoute reads a JSON config file through `loadConfigFile()`, validates it with `proxyConfigIssues()`, then applies defaults with `prepareConfig()` and `resolveSageRouteConfig()`.
+
+The CLI default config path is `./sageroute.config.json`, unless `SAGEROUTE_CONFIG` is set or `--config <path>` is passed.
+
+## Top-Level `ProxyConfig`
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `port` | `number` | `8787` when omitted | Listen port used by `sageroute serve`. Must be an integer from `0` to `65535` if present. |
+| `hostname` | `string` | `"127.0.0.1"` when omitted or blank | Bind address used by `sageroute serve`. There is no dedicated validator for hostname beyond the defaulting behavior in `prepareConfig()`. |
+| `authToken` | `string \| undefined` | `null` after resolution | Optional bearer token clients must send as `Authorization: Bearer <token>`. Supports secret indirection. If it resolves to no value, auth is disabled. |
+| `providers` | `Record<string, ProviderConfig>` | Required | Named upstream providers. Provider names are also used in concrete model refs like `openai/gpt-4.1-mini`. |
+| `sageRoute` | `SageRouteConfig` | Required | The routing ladder and Sage decision settings. The proxy requires this object because this proxy exists to route. |
+
+## `ProviderConfig`
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `adapter` | `"openai-responses" \| "openai-chat" \| "anthropic-messages"` | `"openai-responses"` | Wire format used for this provider. `openai-responses` sends to `/responses`, `openai-chat` sends to `/chat/completions`, and `anthropic-messages` sends to `/messages`. Non-Responses adapters convert provider input/output back to the Responses shape. |
+| `baseUrl` | `string` | Required | Provider base URL including the version segment, for example `https://api.openai.com/v1`. |
+| `apiKey` | `string \| undefined` | `null` when omitted at dispatch time | Optional provider credential. Supports secret indirection. If present, it must resolve to a value during config validation. |
+| `headers` | `Record<string, string> \| undefined` | `{}` | Extra headers merged into every upstream request. `dispatchUpstream()` also sets `Content-Type: application/json`. For `anthropic-messages`, a resolved API key is sent as `x-api-key` and `anthropic-version` is set. Other adapters send a resolved API key as `Authorization: Bearer <key>`. |
+| `models` | `string[] \| undefined` | `[]` for `/v1/models` output and bare-model lookup | Cosmetic model list advertised by `/v1/models`. Routing uses the SageRoute ladder, not this list. For passthrough requests, a bare model id can resolve through this list when multiple providers exist. |
+| `allowPrivateNetwork` | `boolean \| undefined` | Private-network URLs are refused unless this is `true` | Allows loopback and RFC1918 upstream `baseUrl` hosts. This guard exists because a credential-forwarding proxy can become an SSRF primitive. |
+| `timeoutMs` | `number \| undefined` | `600000` | Upstream request timeout in milliseconds. This default is in `src/proxy/upstream.ts` because agent turns can be long. There is no provider-level range validator in `proxyConfigIssues()`. |
+
+## `SageRouteConfig`
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `enabled` | `boolean \| undefined` | Enabled unless explicitly `false`, as long as `cheap` and `strong` exist | Master switch for alias resolution. When `false`, the alias stops resolving and normal routing applies. Validation still checks the `sageRoute` object. |
+| `alias` | `string \| undefined` | `"sageroute"` | Public model id clients request to activate trajectory routing. |
+| `cheap` | `SageRouteTier` | Required | Starting tier for every session. |
+| `strong` | `SageRouteTier` | Required | Escalation tier for struggling sessions. Must differ from `cheap`. |
+| `endpoint` | `string \| undefined` | `"https://sage.levanto.ai"` | Sage decision API base URL. `resolveSageRouteConfig()` trims trailing slashes, and `HttpSageClient` posts to `${endpoint}/decide`. |
+| `apiKey` | `string \| undefined` | `null` after secret resolution | Sage API key. Supports secret indirection. If missing or unresolved, `clientFor()` uses `OfflineSageClient`. |
+| `checkpointEvery` | `number \| undefined` | `3` | Turns between Sage consultations. Must be an integer from `1` to `100` if present. |
+| `firstCheckpointAt` | `number \| undefined` | `3` | Minimum answered tool actions before Sage can be consulted. Must be an integer from `1` to `100` if present. |
+| `interventionThreshold` | `number \| undefined` | `0.6` | Stage-one `yesno` gate. If `P(intervene)` is below this value, the action is `continue`. Must be a number from `0` to `1` if present. |
+| `consecutiveBadRequired` | `number \| undefined` | `2` | Hysteresis for restarts and human escalation. Must be an integer from `1` to `10` if present. The first cheap-to-strong switch can fire after one bad checkpoint. |
+| `maxSwitches` | `number \| undefined` | `1` | Cheap-to-strong switches allowed per session. Must be an integer from `0` to `10` if present. |
+| `maxRestarts` | `number \| undefined` | `1` | Clean restarts allowed per session. Must be an integer from `0` to `10` if present. |
+| `budgetUsd` | `number \| undefined` | `0` | Session spend cap in USD. `0` disables the budget rung. Must be a non-negative number if present. |
+| `budgetEscalateFraction` | `number \| undefined` | `0.85` | Fraction of `budgetUsd` that triggers local `escalate_human` before any Sage call. Must be a number from `0` to `1` if present. |
+| `offline` | `boolean \| undefined` | `false` | Uses the deterministic local decision stub instead of the Sage HTTP API when `true`. |
+| `timeoutMs` | `number \| undefined` | `8000` | Sage HTTP timeout in milliseconds. Must be an integer from `250` to `120000` if present. |
+| `escalateHumanMode` | `"notice" \| "continue" \| undefined` | `"notice"` | Wire behavior for `escalate_human`. `notice` returns a synthesized assistant message and stops the run. `continue` records the verdict but keeps the agent running on the strong tier. |
+
+## `SageRouteTier`
+
+| Field | Type | Default | What it controls |
+| --- | --- | --- | --- |
+| `provider` | `string` | Required | Name of a configured provider. |
+| `model` | `string` | Required | Model id as the provider knows it. |
+| `inputPerMTok` | `number \| undefined` | Cheap tier: `0.25`. Strong tier: `1.25` | USD per 1M input tokens for the session cost ledger. Must be non-negative if present. |
+| `outputPerMTok` | `number \| undefined` | Cheap tier: `2.0`. Strong tier: `10.0` | USD per 1M output tokens for the session cost ledger. Must be non-negative if present. |
+
+Pricing is used only by `addTurnCost()` after a completed turn reports usage. It is not passed to Sage and does not directly affect the decision except through accumulated `costUsd`, `budgetUsd`, and `budgetBurn`.
+
+## Secret Indirection
+
+`resolveSecret()` supports these forms anywhere the code calls it: provider `apiKey`, proxy `authToken`, and Sage `apiKey`.
+
+| Form | Example | Resolution behavior |
+| --- | --- | --- |
+| Literal string | `"sk-live"` | Trims surrounding whitespace and returns the literal value. |
+| Braced env | `"${OPENAI_API_KEY}"` | Reads `process.env.OPENAI_API_KEY`. |
+| Bare env | `"$OPENAI_API_KEY"` | Reads `process.env.OPENAI_API_KEY`. |
+| Prefixed env | `"env:OPENAI_API_KEY"` | Reads `process.env.OPENAI_API_KEY`. |
+| Blank string | `"   "` | Resolves to `undefined`. |
+| Missing env var | `"${MISSING}"` | Resolves to `undefined`. |
+
+Environment variable names must match `[A-Za-z_][A-Za-z0-9_]*` for the indirection form to apply. A non-matching string is treated as a literal after trimming.
+
+Provider `apiKey` values are validated when present: an unresolved env reference produces a config issue. Sage `apiKey` and proxy `authToken` are resolved during `prepareConfig()` and can become `null`. A missing Sage key makes `clientFor()` choose the offline stub. A missing auth token disables bearer auth.
+
+## Validation Rules
+
+`proxyConfigIssues()` returns all issues at once.
+
+| Path | Rule | Error message |
+| --- | --- | --- |
+| `(root)` | Config must be a JSON object. | `config must be a JSON object` |
+| `port` | If present, must be an integer from `0` to `65535`. | `port must be an integer from 0 to 65535` |
+| `providers` | Must be an object. | `providers must be an object of named providers` |
+| `providers` | Must have at least one provider. | `at least one provider is required` |
+| `providers.<name>` | Provider value must be an object. | `provider must be an object` |
+| `providers.<name>.baseUrl` | Required. | `baseUrl is required` |
+| `providers.<name>.baseUrl` | Must parse as a URL. | `baseUrl "<value>" is not a valid URL` |
+| `providers.<name>.baseUrl` | Must use `http:` or `https:`. | `baseUrl must be http or https` |
+| `providers.<name>.baseUrl` | Private hosts require `allowPrivateNetwork: true`. | `baseUrl "<hostname>" is a private address; set allowPrivateNetwork: true to permit it` |
+| `providers.<name>.adapter` | If present, must be one of `openai-responses`, `openai-chat`, or `anthropic-messages`. | `adapter must be one of "openai-responses", "openai-chat", "anthropic-messages"` |
+| `providers.<name>.apiKey` | If present, must resolve through `resolveSecret()`. | `apiKey references an environment variable that is not set: <value>` |
+| `sageRoute` | Required. | `sageRoute is required; this proxy exists to route` |
+
+Private hosts matched by the guard are `localhost`, `127.*`, `0.0.0.0`, `10.*`, `192.168.*`, `169.254.*`, `::1`, and `172.16.*` through `172.31.*`.
+
+`sageRouteConfigIssues()` validates the nested routing config:
+
+| Path under `sageRoute` | Rule | Error message |
+| --- | --- | --- |
+| `(sageRoute)` | Must be an object. | `sageRoute must be an object` |
+| `enabled` | If present, must be boolean. | `enabled must be a boolean` |
+| `alias` | If present, must be string. | `alias must be a string` |
+| `alias` | Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$`. | `alias must use letters, numbers, dot, underscore, or hyphen, with at most one "/" segment` |
+| `alias` | Bare aliases starting with `gpt-`, `o1-`, `o3-`, `o4-`, `codex-`, or `claude-` are rejected. The emitted message currently lists the OpenAI/Codex prefixes and omits `claude-*`, but the regex includes it. | `bare aliases in the OpenAI native family (gpt-*, o1-*, o3-*, o4-*, codex-*) are not allowed` |
+| `alias` | Alias must not equal a configured provider name. | `alias "<alias>" collides with configured provider name "<alias>"` |
+| `cheap` | Must be an object with provider and model. | `cheap must be an object with provider and model` |
+| `strong` | Must be an object with provider and model. | `strong must be an object with provider and model` |
+| `cheap.provider` | Required. | `cheap.provider is required` |
+| `strong.provider` | Required. | `strong.provider is required` |
+| `cheap.provider` | Must name a configured provider. | `cheap.provider "<provider>" is not configured` |
+| `strong.provider` | Must name a configured provider. | `strong.provider "<provider>" is not configured` |
+| `cheap.model` | Required. | `cheap.model is required` |
+| `strong.model` | Required. | `strong.model is required` |
+| `cheap.inputPerMTok`, `cheap.outputPerMTok` | If present, must be finite and non-negative. | `cheap.<field> must be a non-negative number` |
+| `strong.inputPerMTok`, `strong.outputPerMTok` | If present, must be finite and non-negative. | `strong.<field> must be a non-negative number` |
+| `strong` | `cheap.provider` and `cheap.model` cannot both equal `strong.provider` and `strong.model`. | `strong must differ from cheap; a ladder with one rung cannot escalate` |
+| `checkpointEvery` | Integer from `1` to `100`. | `checkpointEvery must be an integer from 1 to 100` |
+| `firstCheckpointAt` | Integer from `1` to `100`. | `firstCheckpointAt must be an integer from 1 to 100` |
+| `consecutiveBadRequired` | Integer from `1` to `10`. | `consecutiveBadRequired must be an integer from 1 to 10` |
+| `maxSwitches` | Integer from `0` to `10`. | `maxSwitches must be an integer from 0 to 10` |
+| `maxRestarts` | Integer from `0` to `10`. | `maxRestarts must be an integer from 0 to 10` |
+| `timeoutMs` | Integer from `250` to `120000`. | `timeoutMs must be an integer from 250 to 120000` |
+| `interventionThreshold` | Number from `0` to `1`. | `interventionThreshold must be a number from 0 to 1` |
+| `budgetEscalateFraction` | Number from `0` to `1`. | `budgetEscalateFraction must be a number from 0 to 1` |
+| `budgetUsd` | If present, must be finite and non-negative. | `budgetUsd must be a non-negative number` |
+| `offline` | If present, must be boolean. | `offline must be a boolean` |
+| `endpoint` | If present, must be a nonblank string. | `endpoint must be a nonblank string` |
+| `apiKey` | If present, must be string. | `apiKey must be a string` |
+| `escalateHumanMode` | If present, must be `notice` or `continue`. | `escalateHumanMode must be "notice" or "continue"` |
+
+## Worked Examples
+
+### Single-Provider OpenAI
+
+This keeps both ladder rungs on the same provider. The provider uses the default `openai-responses` adapter.
+
+```json
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${OPENAI_API_KEY}",
+      "models": ["gpt-4.1-mini", "gpt-4.1"]
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-4.1-mini"
+    },
+    "strong": {
+      "provider": "openai",
+      "model": "gpt-4.1"
+    },
+    "apiKey": "${LEVANTO_API_KEY}"
+  }
+}
+```
+
+### Cross-Vendor Ladder With A Chat-Only Strong Tier
+
+This starts on an OpenAI Responses-compatible provider and escalates to a provider that only exposes Chat Completions. The Chat provider uses the `openai-chat` adapter, so SageRoute converts Responses input into Chat messages and wraps Chat replies back into Responses.
+
+```json
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${OPENAI_API_KEY}",
+      "models": ["gpt-4.1-mini"]
+    },
+    "gateway": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://gateway.example.com/v1",
+      "apiKey": "$GATEWAY_API_KEY",
+      "headers": {
+        "x-routing-profile": "strong"
+      },
+      "models": ["frontier-coder"]
+    }
+  },
+  "sageRoute": {
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "inputPerMTok": 0.25,
+      "outputPerMTok": 2.0
+    },
+    "strong": {
+      "provider": "gateway",
+      "model": "frontier-coder",
+      "inputPerMTok": 1.25,
+      "outputPerMTok": 10.0
+    },
+    "apiKey": "env:LEVANTO_API_KEY",
+    "checkpointEvery": 3,
+    "firstCheckpointAt": 3,
+    "interventionThreshold": 0.6
+  }
+}
+```
+
+### Locked-Down Deployment With Offline Decisions
+
+This binds to loopback, requires a bearer token, sets a budget cap, and uses the deterministic offline Sage stub. The upstream provider still needs its own API key because offline mode only replaces the Sage decision API.
+
+```json
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "authToken": "${SAGEROUTE_AUTH_TOKEN}",
+  "providers": {
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${OPENAI_API_KEY}",
+      "models": ["gpt-4.1-mini", "gpt-4.1"],
+      "timeoutMs": 600000
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-4.1-mini"
+    },
+    "strong": {
+      "provider": "openai",
+      "model": "gpt-4.1"
+    },
+    "offline": true,
+    "budgetUsd": 0.5,
+    "budgetEscalateFraction": 0.85,
+    "maxSwitches": 1,
+    "maxRestarts": 1,
+    "escalateHumanMode": "notice"
+  }
+}
+```
+
+## Troubleshooting Validator Output
+
+`prepareConfig()` throws a `ConfigError` with this prefix:
+
+```text
+invalid SageRoute config:
+```
+
+Each issue is formatted as:
+
+```text
+  - path.to.field: message
+```
+
+Examples:
+
+```text
+invalid SageRoute config:
+  - providers.openai.apiKey: apiKey references an environment variable that is not set: ${OPENAI_API_KEY}
+```
+
+```text
+invalid SageRoute config:
+  - sageRoute.strong: strong must differ from cheap; a ladder with one rung cannot escalate
+```
+
+```text
+invalid SageRoute config:
+  - providers.local.baseUrl: baseUrl "127.0.0.1" is a private address; set allowPrivateNetwork: true to permit it
+```
+
+```text
+invalid SageRoute config:
+  - sageRoute.alias: bare aliases in the OpenAI native family (gpt-*, o1-*, o3-*, o4-*, codex-*) are not allowed
+```
+
+Config file loading can also fail before validation:
+
+```text
+cannot read config at <path>: <reason>
+```
+
+```text
+config at <path> is not valid JSON: <reason>
+```
+
+For a deployment gate, use:
+
+```bash
+sageroute check --config ./sageroute.config.json
+```
+
+On success, it prints the alias, cheap tier, strong tier, and either the Sage endpoint or `offline stub`.

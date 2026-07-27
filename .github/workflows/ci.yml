@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test tests/
+
+      - name: Check example config
+        env:
+          OPENAI_API_KEY: dummy-openai-key
+          ANTHROPIC_API_KEY: dummy-anthropic-key
+          XAI_API_KEY: dummy-xai-key
+          KIMI_API_KEY: dummy-kimi-key
+          SAGE_API_KEY: dummy-sage-key
+        run: bun run src/cli.ts check --config sageroute.config.example.json
