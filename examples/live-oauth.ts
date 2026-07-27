@@ -15,7 +15,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { prepareConfig } from "../src/proxy/config";
+import { prepareConfig, resolveAuthMode } from "../src/proxy/config";
 import { SageRouteProxy } from "../src/proxy/server";
 
 const home = homedir();
@@ -87,7 +87,8 @@ function configFor(vendorUrl: string): ReturnType<typeof prepareConfig> {
       anthropic: {
         adapter: "anthropic-messages",
         baseUrl: vendorUrl,
-        authMode: "oauth",
+        // Deliberately no authMode: the default resolves to the subscription login,
+        // so this run proves the default rather than an explicit opt-in.
         // The stub vendor is on loopback, which the SSRF guard blocks by default.
         allowPrivateNetwork: true,
         models: ["claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"],
@@ -123,6 +124,15 @@ async function main(): Promise<void> {
   const proxy = new SageRouteProxy({ config: configFor(vendorUrl) });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: r => proxy.handle(r) });
   const base = `http://127.0.0.1:${server.port}`;
+
+  // The config above sets no authMode, so this asserts the DEFAULT picked the
+  // subscription rather than an explicit opt-in doing the work.
+  const resolved = configFor(vendorUrl).raw.providers.anthropic!;
+  check(
+    "default auth mode resolved to the subscription login",
+    resolveAuthMode("anthropic", resolved) === "oauth",
+    resolveAuthMode("anthropic", resolved),
+  );
 
   const response = await fetch(`${base}/v1/responses`, {
     method: "POST",

@@ -108,7 +108,7 @@ sageroute auth login anthropic
 sageroute auth status
 ```
 
-Then set that provider to `authMode: "oauth"` and remove `apiKey` from the provider config:
+Then omit `apiKey` for those providers. The default `authMode: "auto"` uses a resolved API key when one is configured, otherwise keyless `anthropic` providers and keyless `openai` providers pointed at the ChatGPT Codex backend use the stored subscription login:
 
 ```json
 {
@@ -116,18 +116,18 @@ Then set that provider to `authMode: "oauth"` and remove `apiKey` from the provi
     "openai": {
       "adapter": "openai-responses",
       "baseUrl": "https://chatgpt.com/backend-api/codex",
-      "authMode": "oauth",
-      "models": ["gpt-5-codex"]
+      "models": ["gpt-5.4-mini"]
     },
     "anthropic": {
       "adapter": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com/v1",
-      "authMode": "oauth",
       "models": ["claude-sonnet-4-5-20250929"]
     }
   }
 }
 ```
+
+Use explicit `authMode: "oauth"` only when you want to force subscription auth and reject a stray `apiKey`. Providers without a login flow, such as xAI and Kimi, stay on API keys.
 
 Credentials are stored in `~/.sageroute/auth.json` with a `0700` directory and `0600` file. Expired access tokens refresh automatically before an upstream request; if no valid login is available, the proxy returns a 401 with the exact `sageroute auth login <provider>` command and does not call upstream.
 
@@ -266,7 +266,7 @@ Because every adapter normalizes to the Responses shape, the ladder can cross ve
 }
 ```
 
-Every credential field supports `${VAR}`, `$VAR`, and `env:VAR` indirection, and a reference to an unset variable fails validation at startup rather than being forwarded upstream as a nonsense key and coming back as an opaque 401.
+Every credential field supports `${VAR}`, `$VAR`, and `env:VAR` indirection. Provider `apiKey` references fail validation only when that key is the credential SageRoute will actually use; under the default `authMode: "auto"`, an unset key can fall through to OAuth for `anthropic` or for `openai` at the ChatGPT Codex backend.
 
 Full reference, including every default and validation rule: **[docs/configuration.md](docs/configuration.md)**.
 

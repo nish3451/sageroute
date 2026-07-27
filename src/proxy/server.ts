@@ -25,7 +25,7 @@ import {
   type SageClient,
 } from "../core";
 import type { LoadedConfig, ProviderConfig } from "./config";
-import { resolveSecret } from "./config";
+import { resolveAuthMode, resolveSecret } from "./config";
 import { dispatchUpstream, type UpstreamCredential } from "./upstream";
 import { getValidAccessToken, loadCredentials, OAuthError } from "../oauth";
 import type { OAuthProviderId } from "../oauth";
@@ -83,7 +83,10 @@ export function resolveTarget(ref: string, providers: Record<string, ProviderCon
 /**
  * Resolve the credential one provider should authenticate with.
  *
- * In `oauth` mode the stored login is the source of truth and is refreshed on demand, so
+ * The mode comes from `resolveAuthMode` so the request path and config validation can
+ * never disagree about which credential is live.
+ *
+ * In OAuth mode the stored login is the source of truth and is refreshed on demand, so
  * a long agent run does not die mid-trajectory on an expired access token. The account id
  * is read alongside it because the ChatGPT backend requires it on every call.
  */
@@ -91,7 +94,7 @@ export async function credentialFor(
   name: string,
   config: ProviderConfig,
 ): Promise<UpstreamCredential> {
-  if ((config.authMode ?? "key") !== "oauth") {
+  if (resolveAuthMode(name, config) !== "oauth") {
     return { mode: "key", apiKey: resolveSecret(config.apiKey) ?? null };
   }
   const provider = (config.oauthProvider ?? name) as OAuthProviderId;

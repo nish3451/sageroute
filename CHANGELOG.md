@@ -19,3 +19,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Session tracking, routing history, and cost ledger.
 - `sageroute serve` and `sageroute check` CLI commands.
 - 84 tests across core routing, signals, evidence, sessions, config, upstream dispatch, the Anthropic adapter, and proxy endpoints.
+
+### Changed
+
+- Provider `authMode` now defaults to `auto`, which keeps resolved API keys on key auth and otherwise uses subscription OAuth for keyless Anthropic providers and keyless OpenAI providers pointed at the ChatGPT Codex backend. `authMode` accepts `auto`, `key`, or `oauth`.
+- `sageroute check` now annotates each ladder tier with the credential it will actually use: `[oauth subscription]`, `[api key]`, or `[no credential]`.

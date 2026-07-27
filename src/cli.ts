@@ -19,10 +19,30 @@ import {
   type OAuthFlowController,
   type OAuthProviderId,
 } from "./oauth";
-import { ConfigError, loadConfigFile } from "./proxy/config";
+import {
+  ConfigError,
+  loadConfigFile,
+  resolveAuthMode,
+  type LoadedConfig,
+} from "./proxy/config";
 import { SageRouteProxy } from "./proxy/server";
 
 const PROVIDERS: readonly OAuthProviderId[] = ["openai", "anthropic"];
+
+/**
+ * Report which credential a ladder tier will actually authenticate with.
+ *
+ * Under the default `auto` mode this is inferred rather than declared, so surfacing it
+ * in `check` is what keeps the choice from being a surprise discovered at runtime.
+ */
+function tierAuthSuffix(loaded: LoadedConfig, providerName: string): string {
+  const provider = loaded.raw.providers[providerName];
+  if (!provider) return "";
+  if (resolveAuthMode(providerName, provider) === "oauth") {
+    return "  [oauth subscription]";
+  }
+  return provider.apiKey === undefined ? "  [no credential]" : "  [api key]";
+}
 
 const USAGE = [
   "sageroute -- trajectory-aware model router",
@@ -240,8 +260,8 @@ async function main(): Promise<void> {
     process.stdout.write(
       `config ok: ${path}\n`
       + `  alias   ${router.alias}\n`
-      + `  cheap   ${router.cheap.provider}/${router.cheap.model}\n`
-      + `  strong  ${router.strong.provider}/${router.strong.model}\n`
+      + `  cheap   ${router.cheap.provider}/${router.cheap.model}${tierAuthSuffix(loaded, router.cheap.provider)}\n`
+      + `  strong  ${router.strong.provider}/${router.strong.model}${tierAuthSuffix(loaded, router.strong.provider)}\n`
       + `  sage    ${router.offline || !router.apiKey ? "offline stub" : router.endpoint}\n`,
     );
     return;

@@ -38,12 +38,64 @@ export const UPSTREAM_ADAPTERS: readonly UpstreamAdapter[] = [
  * The distinction reaches further than the header. A subscription token is issued to a
  * specific first-party client and the vendor validates that the request looks like it,
  * so the Anthropic adapter also shapes the body and headers when this is `oauth`.
+ *
+ * `auto` is the default and prefers the cheaper credential without ever guessing wrong:
+ * an explicit apiKey always wins, and OAuth is chosen only when no key is configured and
+ * the provider actually has a login flow. That makes a subscription the default way to
+ * pay WITHOUT breaking a keyed config or a provider that has no OAuth support.
  */
-export type ProviderAuthMode = "key" | "oauth";
+export type ProviderAuthMode = "auto" | "key" | "oauth";
+
+export const PROVIDER_AUTH_MODES: readonly ProviderAuthMode[] = ["auto", "key", "oauth"];
 
 /** Providers with a login flow implemented. Others must use `key`. */
 export const OAUTH_PROVIDER_IDS = ["openai", "anthropic"] as const;
 export type OAuthProviderName = (typeof OAUTH_PROVIDER_IDS)[number];
+
+/** Subscription tokens are only accepted here, never on the metered API host. */
+export const CHATGPT_SUBSCRIPTION_BASE_URL = "https://chatgpt.com/backend-api/codex";
+
+/**
+ * A ChatGPT subscription token is rejected by the metered API host, so a provider aimed
+ * there can never work over OAuth. Catching it in config turns a puzzling upstream 401
+ * into a fixable message.
+ */
+export function chatgptBaseUrlMismatch(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase().endsWith("api.openai.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decide which credential a provider will actually authenticate with.
+ *
+ * This is the single place the precedence lives, so config validation and the request
+ * path can never disagree about which credential is live. Under `auto` an explicitly
+ * configured, resolvable apiKey always wins: someone who set a key meant to use it, and
+ * silently spending their subscription instead would be a surprise in the wrong
+ * direction. OAuth is chosen only when there is no usable key AND a login flow exists,
+ * which is what makes a subscription the default without breaking keyed or
+ * OAuth-less providers.
+ */
+export function resolveAuthMode(
+  name: string,
+  provider: ProviderConfig,
+  env: Record<string, string | undefined> = process.env,
+): "key" | "oauth" {
+  const declared = provider.authMode ?? "auto";
+  if (declared !== "auto") return declared;
+  if (resolveSecret(provider.apiKey, env) !== undefined) return "key";
+
+  const oauthProvider = provider.oauthProvider ?? name;
+  if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(oauthProvider)) return "key";
+  // A subscription token would be refused at the metered host, so a provider pointed
+  // there stays on keys even with no key set, and fails with a credential error rather
+  // than a confusing upstream rejection.
+  if (oauthProvider === "openai" && chatgptBaseUrlMismatch(provider.baseUrl)) return "key";
+  return "oauth";
+}
 
 export interface ProviderConfig {
   /** Defaults to `openai-responses`, the format agent harnesses actually send. */
@@ -52,7 +104,7 @@ export interface ProviderConfig {
   baseUrl: string;
   /** Supports `${VAR}`, `$VAR`, and `env:VAR` indirection. */
   apiKey?: string;
-  /** Defaults to `key`. See `ProviderAuthMode`. */
+  /** Defaults to `auto`, which prefers a subscription login. See `ProviderAuthMode`. */
   authMode?: ProviderAuthMode;
   /**
    * Which stored login to use when `authMode` is `oauth`. Defaults to the provider's own
@@ -157,16 +209,17 @@ function providerIssues(
       message: `adapter must be one of ${UPSTREAM_ADAPTERS.map(a => `"${a}"`).join(", ")}`,
     });
   }
-  const authMode = provider.authMode ?? "key";
-  if (provider.authMode !== undefined && authMode !== "key" && authMode !== "oauth") {
+  const declared = provider.authMode ?? "auto";
+  if (provider.authMode !== undefined && !PROVIDER_AUTH_MODES.includes(provider.authMode)) {
     issues.push({
       path: ["providers", name, "authMode"],
-      message: 'authMode must be "key" or "oauth"',
+      message: `authMode must be one of ${PROVIDER_AUTH_MODES.map(m => `"${m}"`).join(", ")}`,
     });
+    return;
   }
 
-  if (authMode === "oauth") {
-    const oauthProvider = provider.oauthProvider ?? name;
+  const oauthProvider = provider.oauthProvider ?? name;
+  if (declared === "oauth") {
     if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(oauthProvider)) {
       issues.push({
         path: ["providers", name, "oauthProvider"],
@@ -174,15 +227,30 @@ function providerIssues(
           + `${OAUTH_PROVIDER_IDS.join(", ")}. Set oauthProvider, or use authMode "key".`,
       });
     }
-    // A stray apiKey next to authMode "oauth" is almost always a half-finished migration,
-    // and silently ignoring it would leave the user unsure which credential is in play.
+    // A stray apiKey next to an explicit authMode "oauth" is almost always a
+    // half-finished migration, and silently ignoring it would leave the user unsure
+    // which credential is in play. Under "auto" the precedence is defined, so an
+    // apiKey alongside it is expected rather than ambiguous.
     if (provider.apiKey !== undefined) {
       issues.push({
         path: ["providers", name, "apiKey"],
         message: 'apiKey is not used when authMode is "oauth"; remove it to avoid ambiguity',
       });
     }
-  } else if (provider.apiKey !== undefined && resolveSecret(provider.apiKey) === undefined) {
+    if (oauthProvider === "openai" && chatgptBaseUrlMismatch(base)) {
+      issues.push({
+        path: ["providers", name, "baseUrl"],
+        message: "a ChatGPT subscription token is not accepted at api.openai.com; set baseUrl to "
+          + `${CHATGPT_SUBSCRIPTION_BASE_URL}, or use authMode "key" with an API key`,
+      });
+    }
+  }
+
+  // Only hold an apiKey to account when it is the credential that will actually be used.
+  // Under "auto" an unusable key is not fatal if a subscription login can cover the tier.
+  if (provider.apiKey !== undefined
+    && resolveAuthMode(name, provider) === "key"
+    && resolveSecret(provider.apiKey) === undefined) {
     issues.push({
       path: ["providers", name, "apiKey"],
       message: `apiKey references an environment variable that is not set: ${provider.apiKey}`,
