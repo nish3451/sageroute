@@ -1,0 +1,43 @@
+{
+  "name": "sageroute",
+  "version": "0.1.0",
+  "description": "Trajectory-aware model router. An OpenAI-compatible proxy that starts every task on a cheap model, watches what the agent actually does, and escalates on real execution evidence.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "sageroute": "./src/cli.ts"
+  },
+  "main": "./src/core/index.ts",
+  "exports": {
+    ".": "./src/core/index.ts",
+    "./proxy": "./src/proxy/server.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "sageroute.config.example.json"
+  ],
+  "scripts": {
+    "serve": "bun run src/cli.ts serve",
+    "check": "bun run src/cli.ts check",
+    "test": "bun test tests/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "llm",
+    "router",
+    "proxy",
+    "agents",
+    "openai",
+    "model-routing",
+    "sage",
+    "levanto"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

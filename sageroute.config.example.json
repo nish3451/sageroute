@@ -1,0 +1,44 @@
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${OPENAI_API_KEY}",
+      "models": ["gpt-4.1-mini", "gpt-4.1"]
+    },
+    "anthropic": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "models": ["claude-sonnet-4-20250514"]
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "inputPerMTok": 0.4,
+      "outputPerMTok": 1.6
+    },
+    "strong": {
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "inputPerMTok": 2.0,
+      "outputPerMTok": 8.0
+    },
+    "apiKey": "${SAGE_API_KEY}",
+    "checkpointEvery": 3,
+    "firstCheckpointAt": 3,
+    "interventionThreshold": 0.6,
+    "consecutiveBadRequired": 2,
+    "maxSwitches": 1,
+    "maxRestarts": 1,
+    "budgetUsd": 5.0,
+    "budgetEscalateFraction": 0.85,
+    "escalateHumanMode": "notice"
+  }
+}
