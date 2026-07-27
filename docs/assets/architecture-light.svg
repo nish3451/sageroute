@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title">
+  <title id="title">SageRoute architecture: trajectory-aware routing from execution evidence</title>
+  <defs>
+    <style>
+      text {
+        font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        letter-spacing: 0;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace;
+      }
+      .canvas { fill: #f8fafc; stroke: #d0d7de; }
+      .card { fill: #ffffff; stroke: #cbd5e1; }
+      .soft { fill: #f1f5f9; stroke: #cbd5e1; }
+      .code { fill: #eef2f7; stroke: #cbd5e1; }
+      .decision { fill: #ffffff; stroke: #334155; }
+      .cheap { fill: #e6fffb; stroke: #0f766e; }
+      .warm { fill: #fff7ed; stroke: #b45309; }
+      .text { fill: #111827; }
+      .muted { fill: #4b5563; }
+      .subtle { fill: #64748b; }
+      .stroke { stroke: #64748b; }
+      .stroke-strong { stroke: #334155; }
+      .stroke-cheap { stroke: #0f766e; }
+      .stroke-warm { stroke: #b45309; }
+      .label-bg { fill: #f8fafc; stroke: #d0d7de; }
+    </style>
+    <marker id="arrowNeutral" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowStrong" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrowCheap" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#0f766e"/>
+    </marker>
+    <marker id="arrowWarm" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#b45309"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="24" y="24" width="1552" height="852" rx="28"/>
+
+  <text class="text" x="70" y="88" font-size="34" font-weight="750">SageRoute routes after work starts</text>
+  <text class="muted" x="70" y="123" font-size="18">Prompt routers guess up front. SageRoute waits for execution evidence from the agent trajectory.</text>
+
+  <rect class="soft" x="70" y="165" width="610" height="46" rx="14"/>
+  <text class="subtle" x="95" y="194" font-size="15" font-weight="700">old router</text>
+  <text class="muted" x="190" y="194" font-size="15">classify difficulty from the prompt before any work happens</text>
+  <path class="stroke" d="M 695 188 L 760 188" fill="none" stroke-width="2.5" marker-end="url(#arrowNeutral)"/>
+  <rect class="cheap" x="780" y="165" width="610" height="46" rx="14"/>
+  <text class="text" x="805" y="194" font-size="15" font-weight="700">SageRoute</text>
+  <text class="muted" x="910" y="194" font-size="15">decide mid-task from tool calls, outputs, errors, progress, and spend</text>
+
+  <rect class="card" x="70" y="342" width="235" height="170" rx="18"/>
+  <text class="text" x="96" y="382" font-size="21" font-weight="750">agent harness</text>
+  <text class="muted" x="96" y="410" font-size="14">resends the full</text>
+  <text class="muted" x="96" y="430" font-size="14">conversation each turn</text>
+  <rect class="code" x="94" y="448" width="187" height="44" rx="10"/>
+  <text class="text mono" x="110" y="468" font-size="13">POST /v1/responses</text>
+  <text class="text mono" x="110" y="486" font-size="13">model: sageroute</text>
+
+  <path class="stroke-strong" d="M 306 427 L 365 427" fill="none" stroke-width="3" marker-end="url(#arrowStrong)"/>
+
+  <rect class="card" x="365" y="232" width="390" height="330" rx="20"/>
+  <text class="text" x="395" y="273" font-size="23" font-weight="750">SageRoute proxy</text>
+  <text class="muted" x="395" y="299" font-size="14">OpenAI-compatible transport</text>
+
+  <rect class="soft" x="405" y="324" width="310" height="72" rx="14"/>
+  <text class="text" x="430" y="352" font-size="17" font-weight="700">recover trajectory</text>
+  <text class="muted" x="430" y="376" font-size="13">pair tool calls to outputs by call_id</text>
+
+  <path class="stroke" d="M 560 400 L 560 428" fill="none" stroke-width="2.5" marker-end="url(#arrowNeutral)"/>
+
+  <rect class="soft" x="405" y="433" width="310" height="94" rx="14"/>
+  <text class="text" x="430" y="462" font-size="17" font-weight="700">extract signals</text>
+  <text class="muted" x="430" y="486" font-size="13">loops, error classes, progress</text>
+  <text class="muted" x="430" y="506" font-size="13">rewrite cycles and budget burn</text>
+
+  <text class="subtle" x="395" y="542" font-size="13">request body = execution history</text>
+
+  <path class="stroke" d="M 755 397 C 785 397 790 358 820 358" fill="none" stroke-width="2.8" marker-end="url(#arrowNeutral)"/>
+  <rect class="label-bg" x="744" y="455" width="128" height="30" rx="10"/>
+  <text class="muted" x="760" y="475" font-size="12">evidence summary</text>
+
+  <rect class="card" x="820" y="270" width="260" height="178" rx="20"/>
+  <text class="text" x="850" y="312" font-size="22" font-weight="750">Levanto Sage</text>
+  <text class="muted" x="850" y="340" font-size="14">binary gate, then action</text>
+  <rect class="code" x="850" y="363" width="200" height="54" rx="10"/>
+  <text class="text mono" x="868" y="385" font-size="13">P(intervene)=0.80</text>
+  <text class="text mono" x="868" y="405" font-size="13">verdict: switch_model</text>
+
+  <path class="stroke-strong" d="M 1080 358 C 1110 358 1118 390 1052 405" fill="none" stroke-width="3" marker-end="url(#arrowStrong)"/>
+  <rect class="label-bg" x="1088" y="253" width="158" height="30" rx="10"/>
+  <text class="muted" x="1104" y="273" font-size="12">calibrated verdict + P</text>
+
+  <polygon class="decision" points="1185,294 1320,405 1185,516 1050,405"/>
+  <text class="text" x="1185" y="378" font-size="19" font-weight="750" text-anchor="middle">ladder</text>
+  <text class="text" x="1185" y="402" font-size="17" font-weight="700" text-anchor="middle">+ guardrails</text>
+  <text class="muted" x="1185" y="430" font-size="13" text-anchor="middle">max switches</text>
+  <text class="muted" x="1185" y="449" font-size="13" text-anchor="middle">budget ceiling</text>
+
+  <path class="stroke-cheap" d="M 1316 382 C 1334 322 1360 295 1385 295" fill="none" stroke-width="5" marker-end="url(#arrowCheap)"/>
+  <rect class="cheap" x="1385" y="238" width="150" height="114" rx="18"/>
+  <text class="text mono" x="1460" y="276" font-size="15" font-weight="700" text-anchor="middle">continue</text>
+  <text class="text" x="1460" y="306" font-size="19" font-weight="750" text-anchor="middle">cheap model</text>
+  <text class="muted" x="1460" y="330" font-size="13" text-anchor="middle">default lane</text>
+
+  <path class="stroke" d="M 1320 405 L 1385 405" fill="none" stroke-width="2.7" marker-end="url(#arrowNeutral)"/>
+  <rect class="card" x="1385" y="370" width="150" height="94" rx="16"/>
+  <text class="text mono" x="1460" y="401" font-size="14" font-weight="700" text-anchor="middle">switch_model</text>
+  <text class="text" x="1460" y="429" font-size="18" font-weight="750" text-anchor="middle">strong model</text>
+  <text class="muted" x="1460" y="450" font-size="12" text-anchor="middle">only when needed</text>
+
+  <path class="stroke-cheap" d="M 1312 432 C 1340 492 1360 526 1385 526" fill="none" stroke-width="3" stroke-dasharray="8 7" marker-end="url(#arrowCheap)"/>
+  <rect class="cheap" x="1385" y="488" width="150" height="104" rx="16"/>
+  <text class="text mono" x="1460" y="519" font-size="13" font-weight="700" text-anchor="middle">restart_clean</text>
+  <text class="text" x="1460" y="547" font-size="18" font-weight="750" text-anchor="middle">cheap model</text>
+  <text class="muted" x="1460" y="569" font-size="12" text-anchor="middle">trimmed context</text>
+
+  <path class="stroke-warm" d="M 1185 516 C 1225 648 1318 685 1385 685" fill="none" stroke-width="2.8" marker-end="url(#arrowWarm)"/>
+  <rect class="warm" x="1385" y="638" width="150" height="94" rx="16"/>
+  <text class="text mono" x="1460" y="670" font-size="12" font-weight="700" text-anchor="middle">escalate_human</text>
+  <text class="text" x="1460" y="697" font-size="16" font-weight="750" text-anchor="middle">stop and ask</text>
+  <text class="muted" x="1460" y="718" font-size="12" text-anchor="middle">a person</text>
+
+  <text class="subtle" x="1430" y="788" font-size="13">most traffic stays cheap;</text>
+  <text class="subtle" x="1430" y="808" font-size="13">human escalation is rare</text>
+</svg>

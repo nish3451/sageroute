@@ -4,6 +4,40 @@ SageRoute reads a JSON config file through `loadConfigFile()`, validates it with
 
 The CLI default config path is `./sageroute.config.json`, unless `SAGEROUTE_CONFIG` is set or `--config <path>` is passed.
 
+## Generating A Config With `init`
+
+`sageroute init` writes a config built around the credentials that already exist on the
+machine, so the first run either works or names a real problem instead of failing on a
+placeholder. It never invents a provider you cannot authenticate against.
+
+```bash
+sageroute init [--config <path>] [--force]
+```
+
+Detection runs in `planInit()` in `src/init.ts` and prefers a subscription login over an
+API key, because a subscription turn is the cheaper way to pay for the same work:
+
+| Detected | Cheap tier | Strong tier |
+| --- | --- | --- |
+| ChatGPT and Claude logins | `openai/gpt-5.4-mini` | `anthropic/claude-sonnet-4-5-20250929` |
+| Claude login only | `anthropic/claude-haiku-4-5-20251001` | `anthropic/claude-sonnet-4-5-20250929` |
+| ChatGPT login only | `openai/gpt-5.4-mini` | `openai/gpt-5.6-sol` |
+| `OPENAI_API_KEY` only | `openai/gpt-4.1-mini` | `openai/gpt-4.1` |
+| `ANTHROPIC_API_KEY` only | `anthropic/claude-haiku-4-5-20251001` | `anthropic/claude-sonnet-4-5-20250929` |
+| Nothing | `openai/gpt-4.1-mini` | `openai/gpt-4.1` |
+
+Notes on the generated file:
+
+- An OpenAI provider backed by a subscription login is pinned to `https://chatgpt.com/backend-api/codex`. Subscription tokens are rejected by `https://api.openai.com/v1`.
+- Subscription tiers are written with `inputPerMTok` and `outputPerMTok` of `0`, since a subscription turn is not separately metered. Set real rates if you want the budget guardrail to bite.
+- API-key tiers carry list prices that drift. Correct them against your own billing.
+- `apiKey` is written as `${SAGE_API_KEY}` / `${OPENAI_API_KEY}` indirection, never a literal secret.
+- With no credentials detected, an `OPENAI_API_KEY` config is still written as a starting point and the CLI prints the exact commands needed to make it valid.
+
+`init` refuses to overwrite an existing config and exits `1` unless `--force` is passed.
+After writing, it immediately loads the file through the same validator as `check`, so the
+ladder and the credential each tier resolves to are printed before you ever run `serve`.
+
 ## Top-Level `ProxyConfig`
 
 | Field | Type | Default | What it controls |

@@ -17,7 +17,7 @@
   <img alt="status" src="https://img.shields.io/badge/status-early-orange">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun%201.1%2B-black">
   <img alt="language" src="https://img.shields.io/badge/TypeScript-strict-3178c6">
-  <img alt="tests" src="https://img.shields.io/badge/tests-84%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-120%20passing-brightgreen">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -48,17 +48,13 @@ An agent harness resends its entire conversation on every turn. That request bod
 
 A proxy sees it for free, on a request it is already handling, for every turn of every session. No SDK, no callbacks, no changes to your agent.
 
-```mermaid
-flowchart LR
-    A["agent harness"] -->|"POST /v1/responses<br/>model: sageroute"| B["SageRoute proxy"]
-    B -->|"recovered trajectory"| C["signals<br/>(loops, errors, progress)"]
-    C --> D["Levanto Sage<br/>two-stage verdict"]
-    D --> E{"ladder<br/>+ guardrails"}
-    E -->|"continue"| F["cheap model"]
-    E -->|"switch_model"| G["strong model"]
-    E -->|"restart_clean"| F
-    E -->|"escalate_human"| H["stop, ask a person"]
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/architecture-light.svg">
+    <img alt="SageRoute recovers the agent trajectory from the request body, sends the evidence to Levanto Sage, and applies the verdict through a guarded ladder: continue on the cheap model, switch to a strong model, restart with trimmed context, or escalate to a human." src="docs/assets/architecture-light.svg">
+  </picture>
+</p>
 
 This is not packaging around a router. It is the only place in the stack where trajectory-aware routing is possible without asking anyone to rewrite their agent.
 
@@ -73,13 +69,29 @@ bun install
 Requires [Bun](https://bun.sh) 1.1+.
 
 ```bash
-cp sageroute.config.example.json sageroute.config.json
-export OPENAI_API_KEY=sk-...
-export SAGE_API_KEY=lv_...          # https://docs.levanto.ai/
+export SAGE_API_KEY=lv_...   # https://docs.levanto.ai/
 
-bun run check                       # validate config, then exit
-bun run serve                       # listens on 127.0.0.1:8787
+bun run init                 # detect credentials, write a working config
+bun run serve                # listens on 127.0.0.1:8787
 ```
+
+`init` looks at what you actually have, a subscription login or an API key, and writes a
+config built around it. Then it validates that config and prints the ladder it produced:
+
+```text
+wrote ./sageroute.config.json
+  openai uses your stored ChatGPT subscription login
+  anthropic uses your stored Claude subscription login
+
+ladder
+  cheap   openai/gpt-5.4-mini  [oauth subscription]
+  strong  anthropic/claude-sonnet-4-5-20250929  [oauth subscription]
+  sage    https://sage.levanto.ai
+```
+
+No credentials yet? Run `sageroute auth login anthropic` to use a Claude Pro/Max plan, or
+export `OPENAI_API_KEY`, then `bun run init --force`. Use `bun run check` any time to
+revalidate and see which credential each tier resolves to.
 
 Point any OpenAI-compatible client at it and ask for the router by name:
 

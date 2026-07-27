@@ -18,6 +18,7 @@
     "sageroute.config.example.json"
   ],
   "scripts": {
+    "init": "bun run src/cli.ts init",
     "serve": "bun run src/cli.ts serve",
     "check": "bun run src/cli.ts check",
     "test": "bun test tests/",

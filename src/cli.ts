@@ -25,7 +25,9 @@ import {
   resolveAuthMode,
   type LoadedConfig,
 } from "./proxy/config";
+import { existsSync, writeFileSync } from "node:fs";
 import { SageRouteProxy } from "./proxy/server";
+import { configFromPlan, detectLogins, planInit } from "./init";
 
 const PROVIDERS: readonly OAuthProviderId[] = ["openai", "anthropic"];
 
@@ -48,6 +50,7 @@ const USAGE = [
   "sageroute -- trajectory-aware model router",
   "",
   "Usage:",
+  "  sageroute init [--config <path>] [--force]",
   "  sageroute serve [--config <path>] [--port <n>] [--host <addr>]",
   "  sageroute check [--config <path>]",
   "  sageroute auth login <provider>",
@@ -61,6 +64,7 @@ const USAGE = [
   "  --config <path>   Config file. Default: ./sageroute.config.json (or $SAGEROUTE_CONFIG)",
   "  --port <n>        Override the configured listen port",
   "  --host <addr>     Override the configured bind address",
+  "  --force           Overwrite an existing config during init",
   "  -h, --help        Show this message",
   "",
 ].join("\n");
@@ -228,6 +232,72 @@ async function runAuthCommand(positional: string[]): Promise<void> {
   process.exit(1);
 }
 
+/**
+ * Write a config that is valid for THIS machine.
+ *
+ * The previous first run was copy an example, hand-edit JSON, guess at environment
+ * variables. Each of those is a chance to produce a file that fails validation before
+ * the router has done anything worth seeing. This inspects the credentials that
+ * actually exist and generates a matching ladder.
+ */
+async function runInit(flags: Map<string, string>): Promise<void> {
+  const path = flags.get("config")
+    ?? process.env.SAGEROUTE_CONFIG
+    ?? "./sageroute.config.json";
+
+  if (existsSync(path) && !flags.has("force")) {
+    process.stderr.write(
+      `refusing to overwrite existing config: ${path}\n`
+      + "Pass --force to replace it, or --config <path> to write somewhere else.\n",
+    );
+    process.exit(1);
+  }
+
+  const plan = planInit({ logins: await detectLogins(), env: process.env });
+  writeFileSync(path, `${JSON.stringify(configFromPlan(plan), null, 2)}\n`, "utf8");
+
+  process.stdout.write(`wrote ${path}\n`);
+  for (const note of plan.notes) process.stdout.write(`  ${note}\n`);
+
+  // Validate immediately so a broken first run is reported here rather than at serve
+  // time, and so the credential each tier resolved to is visible up front.
+  let loaded: LoadedConfig;
+  try {
+    loaded = loadConfigFile(path);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      process.stdout.write(`\nconfig needs attention:\n${err.message}\n`);
+      process.stdout.write(nextSteps(plan.notes));
+      return;
+    }
+    throw err;
+  }
+
+  const { router } = loaded;
+  process.stdout.write(
+    "\nladder\n"
+    + `  cheap   ${router.cheap.provider}/${router.cheap.model}${tierAuthSuffix(loaded, router.cheap.provider)}\n`
+    + `  strong  ${router.strong.provider}/${router.strong.model}${tierAuthSuffix(loaded, router.strong.provider)}\n`
+    + `  sage    ${router.offline || !router.apiKey ? "offline stub (set SAGE_API_KEY for live decisions)" : router.endpoint}\n`,
+  );
+  process.stdout.write(nextSteps(plan.notes));
+}
+
+/** Tell the user the shortest path from here to a running router. */
+function nextSteps(notes: readonly string[]): string {
+  const lines = ["", "next"];
+  if (notes.some(n => n.includes("no credentials detected"))) {
+    lines.push("  1. sageroute auth login anthropic   (or export OPENAI_API_KEY)");
+    lines.push("  2. sageroute init --force");
+    lines.push("  3. sageroute serve");
+  } else {
+    lines.push("  1. export SAGE_API_KEY=lv_...   https://docs.levanto.ai/");
+    lines.push("  2. sageroute serve");
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 async function main(): Promise<void> {
   const { command, flags, positional } = parseArgs(process.argv.slice(2));
   if (flags.has("help")) {
@@ -237,6 +307,11 @@ async function main(): Promise<void> {
 
   if (command === "auth") {
     await runAuthCommand(positional);
+    return;
+  }
+
+  if (command === "init") {
+    await runInit(flags);
     return;
   }
 
