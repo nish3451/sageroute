@@ -254,6 +254,7 @@ function providerIssues(
     issues.push({
       path: ["providers", name, "apiKey"],
       message: `apiKey references an environment variable that is not set: ${provider.apiKey}`,
+      code: "env-not-set",
     });
   }
 }

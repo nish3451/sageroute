@@ -17,7 +17,7 @@
   <img alt="status" src="https://img.shields.io/badge/status-early-orange">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun%201.1%2B-black">
   <img alt="language" src="https://img.shields.io/badge/TypeScript-strict-3178c6">
-  <img alt="tests" src="https://img.shields.io/badge/tests-164%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-180%20passing-brightgreen">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -343,6 +343,19 @@ Four vendors, deliberately. A router needs depth on the providers people actuall
 | xAI | `openai-chat` | `/chat/completions` |
 | Kimi (Moonshot) | `openai-chat` | `/chat/completions` |
 
+The provider registry exposes the setup targets used by `sageroute provider add`:
+
+| Registry id | Credential | Default config key | Default models |
+| --- | --- | --- | --- |
+| `openai` | ChatGPT subscription OAuth | `openai` | `gpt-5.4-mini`, `gpt-5.6-sol` |
+| `openai-api` | `OPENAI_API_KEY` | `openai` | `gpt-4.1-mini`, `gpt-4.1` |
+| `anthropic` | Claude subscription OAuth | `anthropic` | `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929` |
+| `anthropic-api` | `ANTHROPIC_API_KEY` | `anthropic` | `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929` |
+| `xai` | `XAI_API_KEY` | `xai` | `grok-4.3`, `grok-4.5` |
+| `kimi` | `KIMI_API_KEY` | `kimi` | `kimi-k2.5`, `kimi-k2.6` |
+
+OpenAI appears twice because a ChatGPT subscription token is rejected by the metered API host; `openai` and `openai-api` use different base URLs. Subscription entries pin `authMode` to `oauth`, so a stray `OPENAI_API_KEY` cannot silently move a subscription tier onto metered billing.
+
 xAI and Kimi both expose OpenAI-compatible Chat Completions, so they are a base URL and a key. Anthropic is the one that genuinely differs, so it gets a real adapter in [src/proxy/anthropic.ts](src/proxy/anthropic.ts): `system` is a top-level field rather than a message, `max_tokens` is required, tool calls and results are content blocks instead of a parallel array, and streaming is a typed event protocol whose token counts arrive split across two frames.
 
 That last detail matters more than it looks. `message_start` carries input tokens and `message_delta` carries the final output count, so an adapter that reads only one of them undercounts every streaming turn and the budget guardrail silently stops working.
@@ -376,6 +389,28 @@ Because every adapter normalizes to the Responses shape, the ladder can cross ve
 ```
 
 Every credential field supports `${VAR}`, `$VAR`, and `env:VAR` indirection. Provider `apiKey` references fail validation only when that key is the credential SageRoute will actually use; under the default `authMode: "auto"`, an unset key can fall through to OAuth for `anthropic` or for `openai` at the ChatGPT Codex backend.
+
+### Provider CLI
+
+You can still hand-edit the JSON above, but the provider commands are the safer path for routine setup. They read the default config path unless you pass `--config <path>`.
+
+```bash
+sageroute provider list
+sageroute provider add openai
+sageroute provider use cheap openai/gpt-5.4-mini
+sageroute provider add anthropic
+sageroute provider use strong anthropic/claude-sonnet-4-5-20250929
+sageroute auth login openai
+sageroute auth login anthropic
+```
+
+`sageroute provider add <id>` writes the provider block from the registry. API key entries are written as `${VAR}` indirection, never literal secrets, so the config stays safe to commit or paste. Subscription entries print the next OAuth command, such as `sageroute auth login openai` or `sageroute auth login anthropic`.
+
+Use `--name <key>` when the default config key is not the one you want, for example when one vendor backs both ladder rungs under separate keys. Then point a rung with `sageroute provider use <cheap|strong> <provider>/<model>`. When the provider key and model match a registry entry, SageRoute carries over the list price; otherwise it warns that you need to set `inputPerMTok` and `outputPerMTok` yourself, because a tier with no price disables the budget rung.
+
+`sageroute provider remove <name>` refuses to remove a provider while `sageRoute.cheap` or `sageRoute.strong` still points at it, and tells you to repoint the tier first.
+
+Every provider edit validates the delta before writing, so an unrelated pre-existing problem cannot block the edit in front of you. Problems the command introduces block the write; pre-existing ones are reported as warnings afterwards. The single exception is a key that is not exported yet: `provider add kimi` is the command that first names `KIMI_API_KEY`, so its absence is listed under `before serving, export:` rather than treated as a broken edit.
 
 Full reference, including every default and validation rule: **[docs/configuration.md](docs/configuration.md)**.
 

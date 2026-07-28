@@ -17,6 +17,17 @@ export type ProviderNameMap = Record<string, unknown>;
 export interface SageRouteValidationIssue {
   path: Array<string | number>;
   message: string;
+  /**
+   * Stable machine tag for the small set of issues a caller may want to treat
+   * differently from a plain error.
+   *
+   * `env-not-set` is fatal when serving, because the request would go out with no
+   * credential, but it is only a pending setup step when editing a config: the shell
+   * running the CLI is routinely not the shell that will run the router. Tagging it
+   * lets an editing command defer it without matching on message text, which would
+   * silently start blocking again the day the wording changes.
+   */
+  code?: "env-not-set";
 }
 
 /**

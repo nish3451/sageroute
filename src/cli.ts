@@ -24,13 +24,24 @@ import {
 } from "./oauth";
 import {
   ConfigError,
+  formatIssues,
   loadConfigFile,
+  proxyConfigIssues,
   resolveAuthMode,
   type LoadedConfig,
 } from "./proxy/config";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { SageRouteProxy } from "./proxy/server";
 import { configFromPlan, detectLogins, planInit } from "./init";
+import {
+  addProvider,
+  getRegistryEntry,
+  PROVIDER_REGISTRY,
+  RegistryError,
+  registryIds,
+  removeProvider,
+  setTier,
+} from "./registry";
 
 const PROVIDERS: readonly OAuthProviderId[] = ["openai", "anthropic"];
 
@@ -61,6 +72,11 @@ const USAGE = [
   "  sageroute auth logout <provider>",
   "  sageroute auth import [provider]",
   "  sageroute auth status",
+  "",
+  "  sageroute provider list",
+  "  sageroute provider add <id> [--name <key>] [--config <path>]",
+  "  sageroute provider remove <name> [--config <path>]",
+  "  sageroute provider use <cheap|strong> <provider>/<model> [--config <path>]",
   "",
   "Auth providers:",
   "  openai, anthropic",
@@ -287,6 +303,175 @@ async function runAuthCommand(positional: string[]): Promise<void> {
  * the router has done anything worth seeing. This inspects the credentials that
  * actually exist and generates a matching ladder.
  */
+function readRawConfig(path: string): Record<string, unknown> {
+  if (!existsSync(path)) {
+    process.stderr.write(`no config at ${path}\nRun \`sageroute init\` to generate one.\n`);
+    process.exit(1);
+  }
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  } catch (err) {
+    process.stderr.write(`config at ${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Write a mutated config, but only after it still validates.
+ *
+ * A provider edit that leaves the file unroutable is worse than a rejected command: the
+ * failure surfaces at the next start, far from the edit that caused it. Validating the
+ * candidate before it reaches disk keeps a bad edit from ever being persisted.
+ */
+function writeCheckedConfig(
+  path: string,
+  before: unknown,
+  after: unknown,
+  notes: readonly string[],
+): void {
+  // Validation is whole-config, so a pre-existing problem elsewhere in the file would
+  // block an unrelated edit. Refusing to add xAI because an OPENAI_API_KEY happens not
+  // to be exported in this shell is a dead end with no obvious way out, and the shell
+  // running the CLI is often not the one that will run the router anyway.
+  //
+  // So the gate is the DELTA: refuse only problems this edit introduced, and report
+  // pre-existing ones as warnings the user can act on when convenient.
+  const priorKeys = new Set(proxyConfigIssues(before).map(issue => issueKey(issue)));
+  const issues = proxyConfigIssues(after);
+  const introduced = issues.filter(issue => !priorKeys.has(issueKey(issue)));
+
+  // An unexported key is the one "introduced" problem that is not a mistake. `provider
+  // add kimi` is precisely the command that first names KIMI_API_KEY, so treating its
+  // absence as a broken edit makes the documented flow impossible: the config must exist
+  // before exporting the key is even meaningful. Defer it to a setup step instead.
+  const pending = introduced.filter(issue => issue.code === "env-not-set");
+  const blocking = introduced.filter(issue => issue.code !== "env-not-set");
+
+  if (blocking.length > 0) {
+    process.stderr.write(`refusing to write; this change breaks the config:\n${formatIssues(blocking)}\n`);
+    process.exit(1);
+  }
+
+  writeFileSync(path, `${JSON.stringify(after, null, 2)}\n`, "utf8");
+  for (const note of notes) process.stdout.write(`${note}\n`);
+  process.stdout.write(`\nwrote ${path}\n`);
+
+  if (pending.length > 0) {
+    process.stdout.write(`\nbefore serving, export:\n${formatIssues(pending)}\n`);
+  }
+
+  const preExisting = issues.filter(issue => priorKeys.has(issueKey(issue)));
+  if (preExisting.length > 0) {
+    process.stdout.write(
+      `\npre-existing issues in this config (not caused by this change):\n${formatIssues(preExisting)}\n`,
+    );
+  }
+}
+
+/** Identity for an issue, so the same problem before and after an edit compares equal. */
+function issueKey(issue: { path: Array<string | number>; message: string }): string {
+  return `${issue.path.join(".")}|${issue.message}`;
+}
+
+/** `provider list`: the registry, plus what this config already uses. */
+function providerList(path: string): void {
+  process.stdout.write("Available providers (sageroute provider add <id>):\n\n");
+  for (const entry of PROVIDER_REGISTRY) {
+    const auth = entry.authKind === "subscription"
+      ? "subscription login"
+      : `key from ${entry.envVar}`;
+    process.stdout.write(
+      `  ${entry.id.padEnd(14)} ${entry.label}\n`
+      + `  ${"".padEnd(14)} ${auth}, models: ${entry.models.join(", ")}\n\n`,
+    );
+  }
+
+  if (!existsSync(path)) {
+    process.stdout.write(`No config at ${path} yet. Run \`sageroute init\` first.\n`);
+    return;
+  }
+  const raw = readRawConfig(path);
+  const configured = Object.entries((raw.providers ?? {}) as Record<string, { baseUrl?: string }>);
+  process.stdout.write(`Configured in ${path}:\n`);
+  if (configured.length === 0) {
+    process.stdout.write("  (none)\n");
+    return;
+  }
+  for (const [name, provider] of configured) {
+    process.stdout.write(`  ${name.padEnd(14)} ${provider.baseUrl ?? "(no baseUrl)"}\n`);
+  }
+}
+
+/**
+ * `provider` subcommands. Every mutation reads, edits, validates, then writes, so a
+ * rejected edit leaves the existing config untouched rather than half-applied.
+ */
+function runProviderCommand(positional: string[], flags: Map<string, string>): void {
+  const path = configPath(flags);
+  const sub = positional[1];
+
+  try {
+    if (sub === "list" || sub === undefined) {
+      providerList(path);
+      return;
+    }
+
+    if (sub === "add") {
+      const id = positional[2];
+      if (!id) {
+        process.stderr.write(`missing provider id. Known: ${registryIds().join(", ")}\n`);
+        process.exit(1);
+      }
+      const entry = getRegistryEntry(id);
+      const raw = readRawConfig(path);
+      const change = addProvider(raw as never, id, { name: flags.get("name") });
+      writeCheckedConfig(path, raw, change.config, change.notes);
+      if (entry?.authKind === "subscription") {
+        process.stdout.write(`\nNext: sageroute auth login ${entry.configName}\n`);
+      }
+      return;
+    }
+
+    if (sub === "remove") {
+      const name = positional[2];
+      if (!name) {
+        process.stderr.write("missing provider name\n");
+        process.exit(1);
+      }
+      const raw = readRawConfig(path);
+      const change = removeProvider(raw as never, name);
+      writeCheckedConfig(path, raw, change.config, change.notes);
+      return;
+    }
+
+    if (sub === "use") {
+      const tier = positional[2];
+      const ref = positional[3];
+      if (tier !== "cheap" && tier !== "strong") {
+        process.stderr.write(`expected tier "cheap" or "strong", got "${tier ?? ""}"\n`);
+        process.exit(1);
+      }
+      if (!ref) {
+        process.stderr.write("missing <provider>/<model>\n");
+        process.exit(1);
+      }
+      const raw = readRawConfig(path);
+      const change = setTier(raw as never, tier, ref);
+      writeCheckedConfig(path, raw, change.config, change.notes);
+      return;
+    }
+  } catch (err) {
+    if (err instanceof RegistryError) {
+      process.stderr.write(`${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  process.stderr.write(`unknown provider command "${sub}"\n\n${USAGE}`);
+  process.exit(1);
+}
+
 async function runInit(flags: Map<string, string>): Promise<void> {
   const path = configPath(flags);
 
@@ -371,6 +556,11 @@ async function main(): Promise<void> {
 
   if (command === "auth") {
     await runAuthCommand(positional);
+    return;
+  }
+
+  if (command === "provider") {
+    runProviderCommand(positional, flags);
     return;
   }
 
