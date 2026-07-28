@@ -1,0 +1,38 @@
+{
+  "port": 8787,
+  "hostname": "127.0.0.1",
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "models": [
+        "gpt-5.4-mini",
+        "gpt-5.6-sol"
+      ]
+    }
+  },
+  "sageRoute": {
+    "enabled": true,
+    "alias": "sageroute",
+    "cheap": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "inputPerMTok": 0,
+      "outputPerMTok": 0
+    },
+    "strong": {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "inputPerMTok": 0,
+      "outputPerMTok": 0
+    },
+    "apiKey": "${SAGE_API_KEY}",
+    "checkpointEvery": 3,
+    "firstCheckpointAt": 3,
+    "interventionThreshold": 0.6,
+    "consecutiveBadRequired": 2,
+    "maxSwitches": 1,
+    "maxRestarts": 1,
+    "escalateHumanMode": "continue"
+  }
+}
