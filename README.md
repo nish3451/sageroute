@@ -416,10 +416,18 @@ Most recent run:
 
 Early, but real and running. What is proven: the decision engine, the proxy transport, and the ladder end to end against the live Sage API, plus real turns answered by a real vendor through a ChatGPT subscription login.
 
+The Claude Code path is proven with the actual client, not a simulation of it. Claude Code 2.1.220 was pointed at a running SageRoute proxy and completed both a plain turn and a tool-using task, answered by `gpt-5.4-mini` through a ChatGPT subscription. That is a cross-vendor run end to end: an Anthropic Messages request in, an OpenAI model out, an Anthropic envelope back. A real inbound request body was captured and replayed through the evidence layer to confirm the tool call and its output are recovered as trajectory steps.
+
+Two bugs surfaced only because that run was real, and both are fixed with regression tests:
+
+- The ChatGPT subscription backend rejects `max_output_tokens` with a 400. Claude Code sends `max_tokens` on every request, which translates to exactly that field, so the whole path was dead against a subscription backend while every test passed.
+- Claude Code prepends a `<system-reminder>` block carrying `CLAUDE.md` contents to the first user message. Observed live: 4817 characters of boilerplate in front of a 68 character task. Since the first user message becomes the goal string sent to Sage, every session would have been routed on a description of the user's global instructions rather than on the actual request.
+
 What is **not** yet proven, stated plainly:
 
 - The routing proof (`examples/live-e2e.ts`) uses a **stub upstream**, so it validates which model a decision sends work to, not real model quality deltas. Measuring actual task outcomes and dollar savings against two real models is the next step.
 - `examples/live-subscription.ts` does hit the real ChatGPT backend and returns genuine model output, but it only proves the transport is one the vendor accepts. It routes a single cheap tier and never exercises an escalation.
+- No live Claude Code session has yet run long enough to trigger an escalation. The real runs stayed on the cheap tier, so a switch through the Anthropic wire is proven against a stub upstream and by unit test, not against a live vendor mid-task.
 - Anthropic subscription auth has **not** been exercised against the live vendor; only OpenAI has. The Anthropic path is covered by protocol-level tests and stub servers over real sockets.
 - A real interactive browser `auth login` has still never been run here. The live OpenAI calls used a credential adopted from the Codex CLI via `auth import`, which exercises token use and refresh but not the authorization-code flow itself.
 - Subscription terms of service are the user's responsibility.
