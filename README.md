@@ -114,6 +114,27 @@ export OPENAI_MODEL=sageroute
 
 Nothing else changes. The harness thinks it is talking to one model. It is talking to a ladder.
 
+### Keeping it running
+
+`serve` runs in the foreground and dies with its terminal, which is right for a first
+look and wrong for a router you code against all day. Two wrappers cover the rest:
+
+```bash
+./scripts/setup.sh                     # one-time: key, credentials, config, start, verify
+./scripts/install-launchagent.sh       # macOS: survive terminals, logout, and reboot
+```
+
+`setup.sh` finishes by sending a real turn through the router and checking the routing
+headers came back, because a process that binds a port has proven only that it binds a
+port. Auth, translation, upstream dispatch, and the ladder are all still unproven at that
+moment.
+
+`install-launchagent.sh` hands the process to launchd, which owns it independently of any
+shell, restarts it if it crashes, and starts it at login. Remove it with
+`./scripts/install-launchagent.sh uninstall`. Both read the Sage key from
+`~/.sageroute/env` rather than the environment, since a background process is exactly the
+thing that cannot inherit an exported variable.
+
 ## Connecting a coding agent
 
 SageRoute accepts the two wire formats real coding agents speak, so the harness you
