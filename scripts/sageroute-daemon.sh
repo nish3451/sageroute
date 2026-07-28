@@ -32,6 +32,16 @@ done
 
 mkdir -p "$STATE"
 
+# A daemon outlives the shell that started it, so it cannot inherit a key that was
+# exported into that shell. Reading the stored env file makes `start` work identically
+# from a fresh terminal, a login item, or a cron entry.
+if [ -f "$STATE/env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$STATE/env"
+  set +a
+fi
+
 running_pid() {
   [ -f "$PIDFILE" ] || return 1
   local pid
