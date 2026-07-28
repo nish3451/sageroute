@@ -4,6 +4,7 @@ import {
   dispatchUpstream,
   headersFor,
   withoutStoredItemIds,
+  withoutRouterOnlyFields,
   type UpstreamRequest,
 } from "../src/proxy/upstream";
 import { ANTHROPIC_OAUTH_BETA, CLAUDE_CODE_SYSTEM_INSTRUCTION } from "../src/oauth";
@@ -155,6 +156,29 @@ describe("OAuth request shaping", () => {
   test("dropping max_output_tokens does not disturb a body that has none", () => {
     const shaped = withoutStoredItemIds({ input: [] });
     expect("max_output_tokens" in shaped).toBe(false);
+  });
+
+  test("router-only success flags are stripped before a Responses turn goes upstream", () => {
+    // Live vendor answers 400 "Unknown parameter: 'input[N].success'". The inbound
+    // Anthropic adapter emits this field whenever Claude Code reports a failed tool
+    // call, so the field appears exactly on the runs the router most needs to survive.
+    const shaped = withoutRouterOnlyFields({
+      input: [
+        { type: "function_call", call_id: "call_1", name: "Bash", arguments: "{}" },
+        { type: "function_call_output", call_id: "call_1", output: "boom", success: false },
+      ],
+    });
+
+    const input = shaped.input as Array<Record<string, unknown>>;
+    expect("success" in input[1]!).toBe(false);
+    // The join key and the observation itself are what the evidence layer reads.
+    expect(input[1]?.call_id).toBe("call_1");
+    expect(input[1]?.output).toBe("boom");
+  });
+
+  test("a body with no router-only fields is returned untouched", () => {
+    const body = { input: [{ type: "function_call_output", call_id: "call_1", output: "ok" }] };
+    expect(withoutRouterOnlyFields(body)).toBe(body);
   });
 
   test("dispatch strips item ids for a ChatGPT OAuth turn but leaves a keyed turn intact", async () => {

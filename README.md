@@ -17,7 +17,7 @@
   <img alt="status" src="https://img.shields.io/badge/status-early-orange">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun%201.1%2B-black">
   <img alt="language" src="https://img.shields.io/badge/TypeScript-strict-3178c6">
-  <img alt="tests" src="https://img.shields.io/badge/tests-154%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-164%20passing-brightgreen">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -382,7 +382,7 @@ src/cli.ts    serve and check
 ## Testing
 
 ```bash
-bun test tests/      # 154 tests
+bun test tests/      # 164 tests
 bun run typecheck
 ```
 
@@ -418,16 +418,28 @@ Early, but real and running. What is proven: the decision engine, the proxy tran
 
 The Claude Code path is proven with the actual client, not a simulation of it. Claude Code 2.1.220 was pointed at a running SageRoute proxy and completed both a plain turn and a tool-using task, answered by `gpt-5.4-mini` through a ChatGPT subscription. That is a cross-vendor run end to end: an Anthropic Messages request in, an OpenAI model out, an Anthropic envelope back. A real inbound request body was captured and replayed through the evidence layer to confirm the tool call and its output are recovered as trajectory steps.
 
-Two bugs surfaced only because that run was real, and both are fixed with regression tests:
+A live escalation has now been observed end to end. Claude Code was given a task the cheap model could not carry: implement a backtracking regex engine from scratch, with 32 expectations generated from Python's own `re` module and no regex library allowed. The cheap model failed its own test runs repeatedly, and at step 12 the router acted on that evidence:
+
+```text
+[sageroute] switch_model (openai/gpt-5.4-mini -> openai/gpt-5.6-sol)
+            P(intervene)=0.90 source=sage confidence=0.75 sage_latency=305ms
+            reason="agent struggling on cheap model; escalating capability"
+```
+
+The session ran 17 turns, consulted Sage 4 times, switched once, and finished green: `32 passed`, with no regex import in the final `engine.py`. The same task family is worth noting in both directions. An earlier attempt used an expression evaluator with deliberately un-Pythonic semantics, and the cheap model simply solved it in 10 turns with 3 checkpoints and no switch. The router held it on the cheap tier the entire time, which is the behavior that makes the escalation above meaningful rather than trigger-happy.
+
+Three bugs surfaced only because those runs were real, and all three are fixed with regression tests:
 
 - The ChatGPT subscription backend rejects `max_output_tokens` with a 400. Claude Code sends `max_tokens` on every request, which translates to exactly that field, so the whole path was dead against a subscription backend while every test passed.
 - Claude Code prepends a `<system-reminder>` block carrying `CLAUDE.md` contents to the first user message. Observed live: 4817 characters of boilerplate in front of a 68 character task. Since the first user message becomes the goal string sent to Sage, every session would have been routed on a description of the user's global instructions rather than on the actual request.
+- The inbound Anthropic adapter marks a failed tool call with `success: false` so the evidence layer can tell failure from success without sniffing text. That field is not part of the Responses wire, and the ChatGPT backend rejects the entire turn with 400 `Unknown parameter: 'input[N].success'`. It only ever appears when the agent's own commands fail, so it was invisible until the first run designed to make the agent struggle, and it broke exactly the runs the router exists to rescue. The field is now stripped at transport, after routing has already read it.
 
 What is **not** yet proven, stated plainly:
 
 - The routing proof (`examples/live-e2e.ts`) uses a **stub upstream**, so it validates which model a decision sends work to, not real model quality deltas. Measuring actual task outcomes and dollar savings against two real models is the next step.
 - `examples/live-subscription.ts` does hit the real ChatGPT backend and returns genuine model output, but it only proves the transport is one the vendor accepts. It routes a single cheap tier and never exercises an escalation.
-- No live Claude Code session has yet run long enough to trigger an escalation. The real runs stayed on the cheap tier, so a switch through the Anthropic wire is proven against a stub upstream and by unit test, not against a live vendor mid-task.
+- The live escalation above is a single observed run, not a measured win. It proves the ladder fires on real mid-task evidence and that the stronger model finished a task the cheap one was failing. It does not establish how often the router is right, how many switches were avoidable, or what it saves in aggregate. That needs a benchmark across many tasks, which has not been run.
+- `restart_clean` and `escalate_human` have still never fired against a live vendor mid-task. Only the cheap-to-strong hop has. Both remain proven by unit test and stub upstream, and both are deliberately harder to reach: they require repeated agreement, while the first switch fires on one bad checkpoint.
 - Anthropic subscription auth has **not** been exercised against the live vendor; only OpenAI has. The Anthropic path is covered by protocol-level tests and stub servers over real sockets.
 - A real interactive browser `auth login` has still never been run here. The live OpenAI calls used a credential adopted from the Codex CLI via `auth import`, which exercises token use and refresh but not the authorization-code flow itself.
 - Subscription terms of service are the user's responsibility.

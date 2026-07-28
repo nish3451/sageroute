@@ -74,6 +74,34 @@ export function withoutStoredItemIds(body: Record<string, unknown>): Record<stri
   return next;
 }
 
+/**
+ * Drop fields that exist only for the router.
+ *
+ * `success` on a `function_call_output` is a codex-rs convention, and the inbound
+ * Anthropic adapter emits it so the evidence layer can tell a failed tool call from a
+ * successful one without sniffing the output text. It is not part of the Responses wire:
+ * the ChatGPT backend rejects the whole turn with 400 "Unknown parameter:
+ * 'input[N].success'". Found against the live vendor, on the first Claude Code run whose
+ * agent actually failed a command -- every earlier run succeeded on every tool call, so
+ * nothing ever emitted the field.
+ *
+ * Stripping here rather than at translation time is deliberate: routing reads the
+ * trajectory from the inbound body and has already scored it by the time a turn is
+ * dispatched, so the signal is preserved exactly where it is needed and removed exactly
+ * where it is rejected.
+ */
+export function withoutRouterOnlyFields(body: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(body.input)) return body;
+  let changed = false;
+  const input = body.input.map(item => {
+    if (!isObj(item) || item.type !== "function_call_output" || !("success" in item)) return item;
+    changed = true;
+    const { success: _success, ...rest } = item;
+    return rest;
+  });
+  return changed ? { ...body, input } : body;
+}
+
 export interface TurnUsage {
   inputTokens: number;
   outputTokens: number;
@@ -506,6 +534,8 @@ export async function dispatchUpstream(
       : responsesToChat(request.body, request.model);
   } else {
     payload = { ...request.body, model: request.model };
+    // Router-only bookkeeping is never valid on the Responses wire, on any host.
+    payload = withoutRouterOnlyFields(payload);
     // The ChatGPT backend does not persist response items for a subscription caller, so
     // forwarded item ids would reference stored objects that do not exist and 404.
     if (isOAuth) payload = withoutStoredItemIds(payload);
