@@ -124,6 +124,24 @@ sageroute auth login anthropic
 sageroute auth status
 ```
 
+If the Codex CLI or Claude Code has already logged in on this machine, skip the browser
+entirely and adopt the credential they already hold:
+
+```bash
+sageroute auth import          # every login found
+sageroute auth import openai   # just one provider
+```
+
+```text
+Imported openai as you@example.com from Codex CLI
+  source  /Users/you/.codex/auth.json
+  status  expires at 8/7/2026, 12:17:13 AM
+```
+
+This reads `~/.codex/auth.json` and `~/.claude/.credentials.json` and never writes to
+them. No new grant is created, so logging out of the original tool revokes this too.
+It also works headless, where the browser flow cannot run at all.
+
 Then omit `apiKey` for those providers. The default `authMode: "auto"` uses a resolved API key when one is configured, otherwise keyless `anthropic` providers and keyless `openai` providers pointed at the ChatGPT Codex backend use the stored subscription login:
 
 ```json
@@ -340,12 +358,14 @@ Most recent run:
 
 ## Status and honest limitations
 
-Early, but real and running. What is proven: the decision engine, the proxy transport, and the ladder end to end against the live Sage API.
+Early, but real and running. What is proven: the decision engine, the proxy transport, and the ladder end to end against the live Sage API, plus real turns answered by a real vendor through a ChatGPT subscription login.
 
 What is **not** yet proven, stated plainly:
 
-- The live proof uses a **stub upstream**, so it validates routing behavior, not real model quality deltas. Measuring actual task outcomes and dollar savings against two real models is the next step.
-- The OAuth flows were verified against the vendors' documented protocols and end to end against stub vendor servers over real sockets, including the credential store, expiry/refresh behavior, and exact upstream request shaping. A real interactive `auth login` against live ChatGPT or Anthropic servers has not been executed in this environment.
+- The routing proof (`examples/live-e2e.ts`) uses a **stub upstream**, so it validates which model a decision sends work to, not real model quality deltas. Measuring actual task outcomes and dollar savings against two real models is the next step.
+- `examples/live-subscription.ts` does hit the real ChatGPT backend and returns genuine model output, but it only proves the transport is one the vendor accepts. It routes a single cheap tier and never exercises an escalation.
+- Anthropic subscription auth has **not** been exercised against the live vendor; only OpenAI has. The Anthropic path is covered by protocol-level tests and stub servers over real sockets.
+- A real interactive browser `auth login` has still never been run here. The live OpenAI calls used a credential adopted from the Codex CLI via `auth import`, which exercises token use and refresh but not the authorization-code flow itself.
 - Subscription terms of service are the user's responsibility.
 - Thresholds and the intervention gate default were chosen by reasoning and small-scale testing, not by tuning on a large benchmark.
 - Session state is in-memory and per-process. A multi-replica deployment will route each replica independently.

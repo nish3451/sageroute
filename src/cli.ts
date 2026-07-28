@@ -8,7 +8,10 @@
 
 import {
   authFilePath,
+  claudeAuthPath,
+  codexAuthPath,
   deleteCredentials,
+  discoverImportableCredentials,
   listCredentials,
   loginAnthropic,
   loginOpenAI,
@@ -56,6 +59,7 @@ const USAGE = [
   "  sageroute check [--config <path>]",
   "  sageroute auth login <provider>",
   "  sageroute auth logout <provider>",
+  "  sageroute auth import [provider]",
   "  sageroute auth status",
   "",
   "Auth providers:",
@@ -194,6 +198,43 @@ async function authLogout(provider: OAuthProviderId): Promise<void> {
   }
 }
 
+/**
+ * Adopt subscription logins other CLIs already completed on this machine.
+ *
+ * The browser flow needs a GUI, a loopback port, and a human, which is the slowest part
+ * of setup and impossible in a headless session. When Codex or Claude Code has already
+ * paid that cost, reusing the credential creates no new grant and skips the whole step.
+ */
+async function authImport(only?: OAuthProviderId): Promise<void> {
+  const found = discoverImportableCredentials()
+    .filter(entry => only === undefined || entry.provider === only);
+
+  if (found.length === 0) {
+    const scope = only ? `for ${only}` : "on this machine";
+    process.stderr.write(
+      `No importable subscription logins found ${scope}.\n`
+      + `Looked in:\n  ${codexAuthPath()}\n  ${claudeAuthPath()}\n`
+      + "Run `sageroute auth login <provider>` to authorize in a browser instead.\n",
+    );
+    process.exit(1);
+  }
+
+  for (const entry of found) {
+    await saveCredentials(entry.provider, entry.credentials);
+    const account = entry.credentials.email ? ` as ${entry.credentials.email}` : "";
+    process.stdout.write(
+      `Imported ${entry.provider}${account} from ${entry.sourceTool}\n`
+      + `  source  ${entry.sourcePath}\n`
+      + `  status  ${expiryStatus(entry.credentials)}\n`,
+    );
+  }
+
+  process.stdout.write(
+    `\nStored in ${authFilePath()}\n`
+    + "The source file was not modified. Refresh happens independently from here.\n",
+  );
+}
+
 async function authStatus(): Promise<void> {
   const stored = await listCredentials();
   const present = PROVIDERS.filter(provider => stored[provider]);
@@ -221,6 +262,11 @@ async function runAuthCommand(positional: string[]): Promise<void> {
   }
   if (subcommand === "logout") {
     await authLogout(requireProvider(positional[2]));
+    return;
+  }
+  if (subcommand === "import") {
+    // The provider argument is optional here: with none, import everything found.
+    await authImport(positional[2] ? requireProvider(positional[2]) : undefined);
     return;
   }
   if (subcommand === "status") {

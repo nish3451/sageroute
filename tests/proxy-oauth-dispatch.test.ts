@@ -165,4 +165,97 @@ describe("OAuth request shaping", () => {
     expect(keyBody).not.toHaveProperty("store");
     expect((keyBody.input as Array<Record<string, unknown>>)[0]?.id).toBe("msg_1");
   });
+
+  /**
+   * These three cover bugs that only a real vendor exposed. Every stubbed upstream in
+   * this suite accepted a non-streaming body and set a content-type, so none of them
+   * could fail the way the live ChatGPT backend did.
+   */
+  function chatgptRequest(stream: boolean): UpstreamRequest {
+    return {
+      provider: "openai",
+      config: { baseUrl: "https://chatgpt.com/backend-api/codex" },
+      model: "gpt-5.4-mini",
+      body: { input: [{ type: "message", role: "user", content: "hi" }] },
+      stream,
+    };
+  }
+
+  /** An SSE reply with NO content-type, exactly as the ChatGPT backend answers. */
+  function sseReply(frames: readonly string[]): () => Response {
+    return () => new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const frame of frames) {
+            controller.enqueue(new TextEncoder().encode(`data: ${frame}\n`));
+          }
+          controller.close();
+        },
+      }),
+      { status: 200 },
+    );
+  }
+
+  const COMPLETED_FRAME = JSON.stringify({
+    type: "response.completed",
+    // The live backend reports an EMPTY output array on this terminal frame.
+    response: { id: "resp_1", object: "response", model: "gpt-5.4-mini", output: [], usage: { input_tokens: 3, output_tokens: 1 } },
+  });
+  const ITEM_FRAME = JSON.stringify({
+    type: "response.output_item.done",
+    item: { type: "message", role: "assistant", content: [{ type: "output_text", text: "pong" }] },
+  });
+
+  test("forces stream on a ChatGPT subscription turn, which the backend requires", async () => {
+    const capture = captureFetch(sseReply([COMPLETED_FRAME]));
+    await dispatchUpstream(
+      chatgptRequest(false),
+      { mode: "oauth", provider: "openai", token: "tok" },
+      capture.fetchImpl,
+    );
+
+    // Without this the live vendor answers 400 "Stream must be set to true".
+    const sent = JSON.parse(String(capture.seen().init?.body)) as Record<string, unknown>;
+    expect(sent.stream).toBe(true);
+
+    // A keyed turn must NOT be rewritten; only the subscription backend demands this.
+    const keyed = captureFetch(() => Response.json({ id: "resp_1", output: [], usage: {} }));
+    await dispatchUpstream(
+      { ...chatgptRequest(false), config: { baseUrl: "https://api.openai.com/v1" } },
+      "sk-key",
+      keyed.fetchImpl,
+    );
+    expect(JSON.parse(String(keyed.seen().init?.body))).not.toHaveProperty("stream");
+  });
+
+  test("reassembles a forced stream into JSON for a caller that asked for an object", async () => {
+    const capture = captureFetch(sseReply([COMPLETED_FRAME]));
+    const result = await dispatchUpstream(
+      chatgptRequest(false),
+      { mode: "oauth", provider: "openai", token: "tok" },
+      capture.fetchImpl,
+    );
+
+    // A missing content-type must not be misread as JSON; that returned a bare {}.
+    expect(result.response.headers.get("content-type")).toBe("application/json");
+    const body = await result.response.json() as Record<string, unknown>;
+    expect(body.id).toBe("resp_1");
+    expect(await result.usage).toEqual({ inputTokens: 3, outputTokens: 1 });
+  });
+
+  test("recovers output items the terminal frame omits", async () => {
+    const capture = captureFetch(sseReply([ITEM_FRAME, COMPLETED_FRAME]));
+    const result = await dispatchUpstream(
+      chatgptRequest(false),
+      { mode: "oauth", provider: "openai", token: "tok" },
+      capture.fetchImpl,
+    );
+
+    // The terminal frame carries output: [], so trusting it alone loses the answer and
+    // the turn looks like a successful empty reply.
+    const body = await result.response.json() as { output?: Array<Record<string, unknown>> };
+    expect(body.output).toHaveLength(1);
+    const content = body.output?.[0]?.content as Array<{ text?: string }>;
+    expect(content[0]?.text).toBe("pong");
+  });
 });

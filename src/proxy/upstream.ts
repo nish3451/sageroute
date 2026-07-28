@@ -338,6 +338,56 @@ function meterStream(
 }
 
 /**
+ * Collapse a Responses SSE stream back into the single JSON object it describes.
+ *
+ * Needed because the transport and the caller can disagree: the ChatGPT subscription
+ * backend only accepts `stream: true`, but a caller that asked for a plain object still
+ * expects one. Responses streaming emits the completed object nested under `response`,
+ * so the last such frame is the authoritative result.
+ */
+async function collapseResponsesStream(
+  source: ReadableStream<Uint8Array>,
+): Promise<Record<string, unknown>> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let latest: Record<string, unknown> = {};
+  // The ChatGPT backend's terminal frame carries an EMPTY `output` array; the actual
+  // message items only ever arrive on `response.output_item.done`. Collecting them here
+  // is what keeps a reassembled turn from looking like a successful empty answer.
+  const items: Array<Record<string, unknown>> = [];
+
+  // @ts-expect-error async iteration over a web stream is supported at runtime
+  for await (const chunk of source) {
+    buffer += decoder.decode(chunk as Uint8Array, { stream: true });
+    let cut = buffer.indexOf("\n");
+    while (cut !== -1) {
+      const line = buffer.slice(0, cut).trim();
+      buffer = buffer.slice(cut + 1);
+      cut = buffer.indexOf("\n");
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const event = JSON.parse(payload) as unknown;
+        if (!isObj(event)) continue;
+        if (event.type === "response.output_item.done" && isObj(event.item)) {
+          items.push(event.item);
+          continue;
+        }
+        if (isObj(event.response)) latest = event.response;
+        else if (event.object === "response") latest = event;
+      } catch {
+        // A partial or non-JSON frame is not worth failing the turn over.
+      }
+    }
+  }
+
+  const existing = latest.output;
+  const hasOutput = Array.isArray(existing) && existing.length > 0;
+  return hasOutput || items.length === 0 ? latest : { ...latest, output: items };
+}
+
+/**
  * Translate a stream of Chat Completions deltas into Responses SSE events, so a client
  * that only speaks Responses can stream from a Chat-only upstream.
  */
@@ -431,6 +481,11 @@ export async function dispatchUpstream(
   const url = `${base}${isAnthropic ? "/messages" : isChat ? "/chat/completions" : "/responses"}`;
   const cred = normalizeCredential(credential);
   const isOAuth = cred.mode === "oauth";
+  // The ChatGPT subscription backend refuses a non-streaming body with
+  // 400 "Stream must be set to true". Found against the live vendor; no stub enforces
+  // it. The transport is therefore forced to stream even when the caller asked for a
+  // single JSON object, and the events are reassembled below.
+  const forceStream = isOAuth && cred.provider === "openai" && !isAnthropic && !isChat;
   let payload: Record<string, unknown>;
   if (isAnthropic) {
     payload = responsesToAnthropic(request.body, request.model);
@@ -447,6 +502,7 @@ export async function dispatchUpstream(
     // The ChatGPT backend does not persist response items for a subscription caller, so
     // forwarded item ids would reference stored objects that do not exist and 404.
     if (isOAuth) payload = withoutStoredItemIds(payload);
+    if (forceStream) payload = { ...payload, stream: true };
   }
 
   const controller = new AbortController();
@@ -482,8 +538,13 @@ export async function dispatchUpstream(
     };
   }
 
-  const streaming = request.stream && Boolean(upstream.body)
-    && (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+  // The ChatGPT backend answers a streamed request with SSE frames but sends NO
+  // content-type header at all, so sniffing the header alone silently misclassifies the
+  // body as JSON and yields an empty object. When the transport forced streaming we
+  // already know what is on the wire, so trust that over the missing header.
+  const sseBody = Boolean(upstream.body)
+    && (forceStream || (upstream.headers.get("content-type") ?? "").includes("text/event-stream"));
+  const streaming = request.stream && sseBody;
 
   if (streaming) {
     const done = (u: TurnUsage): void => { clearTimeout(timer); settle(u); };
@@ -500,6 +561,21 @@ export async function dispatchUpstream(
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
         },
+      }),
+      usage,
+    };
+  }
+
+  // The transport was forced to stream for a caller that asked for a plain object, so
+  // put the object back together before answering.
+  if (!request.stream && sseBody) {
+    const collapsed = await collapseResponsesStream(upstream.body!);
+    clearTimeout(timer);
+    settle(readUsage(collapsed) ?? { inputTokens: 0, outputTokens: 0 });
+    return {
+      response: new Response(JSON.stringify(collapsed), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
       }),
       usage,
     };
