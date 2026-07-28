@@ -41,6 +41,25 @@ function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/**
+ * Remove Claude Code's `<system-reminder>` context injections from message text.
+ *
+ * Claude Code prepends a large reminder block to the first user message carrying
+ * CLAUDE.md contents and standing instructions. Observed live: a 4817 character
+ * reminder in front of a 68 character task. Merged into the message text, that
+ * reminder becomes the recovered goal, which is the exact string sent to Sage as the
+ * description of the task. Routing every Claude Code session on boilerplate rather
+ * than on the user's actual request degrades every verdict, so it is stripped here.
+ *
+ * Only fully delimited spans are removed. Text the user genuinely wrote is never
+ * touched, and a message that is nothing but a reminder collapses to empty and is
+ * dropped by the caller.
+ */
+export function stripSystemReminders(text: string): string {
+  if (!text.includes("<system-reminder>")) return text;
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+}
+
 function messageId(): string {
   return `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -64,7 +83,8 @@ export function anthropicRequestToResponses(body: Record<string, unknown>): Reco
     const content = raw.content;
 
     if (typeof content === "string") {
-      if (content) input.push(textItem(role, content));
+      const cleaned = stripSystemReminders(content);
+      if (cleaned) input.push(textItem(role, cleaned));
       continue;
     }
     if (!Array.isArray(content)) continue;
@@ -81,7 +101,8 @@ export function anthropicRequestToResponses(body: Record<string, unknown>): Reco
       const type = typeof block.type === "string" ? block.type : "";
 
       if (type === "text" && typeof block.text === "string") {
-        text.push(block.text);
+        const cleaned = stripSystemReminders(block.text);
+        if (cleaned) text.push(cleaned);
         continue;
       }
 

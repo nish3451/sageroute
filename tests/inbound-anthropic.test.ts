@@ -3,6 +3,7 @@ import {
   anthropicRequestToResponses,
   responsesStreamToAnthropic,
   responsesToAnthropicReply,
+  stripSystemReminders,
 } from "../src/proxy/inbound-anthropic";
 
 function streamFrom(text: string): ReadableStream<Uint8Array> {
@@ -109,6 +110,42 @@ describe("anthropicRequestToResponses", () => {
     expect(JSON.stringify(first.content)).toContain("refactor auth");
   });
 
+  test("strips the system-reminder block Claude Code prepends to the first message", () => {
+    // Observed live: a 4817 character reminder in front of a 68 character task. Merged
+    // in, that boilerplate becomes the goal string sent to Sage, so every Claude Code
+    // session would be routed on CLAUDE.md contents instead of the user's request.
+    const reminder = "<system-reminder>\nCodebase instructions here.\n</system-reminder>\n\n";
+    const result = anthropicRequestToResponses({
+      model: "sageroute",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: reminder },
+          { type: "text", text: "list the txt files" },
+        ],
+      }],
+    });
+
+    const text = JSON.stringify(result.input);
+    expect(text).toContain("list the txt files");
+    expect(text).not.toContain("system-reminder");
+    expect(text).not.toContain("Codebase instructions here");
+  });
+
+  test("a message that is only a reminder is dropped rather than sent as an empty turn", () => {
+    const result = anthropicRequestToResponses({
+      model: "sageroute",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "<system-reminder>noise</system-reminder>" }] },
+        { role: "user", content: [{ type: "text", text: "the real task" }] },
+      ],
+    });
+
+    const input = result.input as Array<Record<string, unknown>>;
+    expect(input).toHaveLength(1);
+    expect(JSON.stringify(input[0]!.content)).toContain("the real task");
+  });
+
   test("translates tools into the Responses function shape", () => {
     const result = anthropicRequestToResponses({
       model: "sageroute",
@@ -125,6 +162,28 @@ describe("anthropicRequestToResponses", () => {
     expect(tools[0]!.name).toBe("bash");
     expect(tools[0]!.type).toBe("function");
     expect(tools[0]!.parameters).toEqual({ type: "object", properties: { cmd: { type: "string" } } });
+  });
+});
+
+describe("stripSystemReminders", () => {
+  test("removes a delimited reminder span", () => {
+    expect(stripSystemReminders("<system-reminder>ctx</system-reminder>\n\ndo the thing"))
+      .toBe("do the thing");
+  });
+
+  test("removes several spans in one message", () => {
+    expect(stripSystemReminders("<system-reminder>a</system-reminder>keep<system-reminder>b</system-reminder>"))
+      .toBe("keep");
+  });
+
+  test("leaves ordinary text untouched", () => {
+    expect(stripSystemReminders("just a normal request")).toBe("just a normal request");
+  });
+
+  test("leaves an unterminated tag alone rather than eating the user's text", () => {
+    // Truncating from a stray opener would silently discard a real request.
+    const text = "why does <system-reminder> appear in my logs";
+    expect(stripSystemReminders(text)).toBe(text);
   });
 });
 
