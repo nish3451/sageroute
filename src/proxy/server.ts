@@ -27,6 +27,11 @@ import {
 import type { LoadedConfig, ProviderConfig } from "./config";
 import { resolveAuthMode, resolveSecret } from "./config";
 import { dispatchUpstream, type UpstreamCredential } from "./upstream";
+import {
+  anthropicRequestToResponses,
+  responsesStreamToAnthropic,
+  responsesToAnthropicReply,
+} from "./inbound-anthropic";
 import { getValidAccessToken, loadCredentials, OAuthError } from "../oauth";
 import type { OAuthProviderId } from "../oauth";
 
@@ -52,6 +57,15 @@ function json(body: unknown, status = 200): Response {
 
 function errorResponse(message: string, status: number, type = "invalid_request_error"): Response {
   return json({ error: { message, type } }, status);
+}
+
+/** A closed stream, so a body-less upstream reply still terminates the client protocol. */
+function emptyStream(): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
 }
 
 /**
@@ -148,12 +162,19 @@ export class SageRouteProxy {
     this.sage = options.sageClient ?? clientFor(options.config.router, options.fetchImpl);
   }
 
-  /** Bearer check. Absent `authToken` means the proxy trusts its network. */
+  /**
+   * Client auth. Absent `authToken` means the proxy trusts its network.
+   *
+   * Anthropic clients send `x-api-key` rather than an Authorization header, so both are
+   * accepted; checking only for a bearer token would reject every Claude Code request
+   * before it reached a route.
+   */
   private authorized(request: Request): boolean {
     const expected = this.options.config.authToken;
     if (!expected) return true;
     const header = request.headers.get("authorization") ?? "";
-    return header.startsWith("Bearer ") && header.slice(7).trim() === expected;
+    if (header.startsWith("Bearer ") && header.slice(7).trim() === expected) return true;
+    return (request.headers.get("x-api-key") ?? "").trim() === expected;
   }
 
   async handle(request: Request): Promise<Response> {
@@ -171,6 +192,10 @@ export class SageRouteProxy {
     if (path === "/v1/chat/completions" || path === "/chat/completions") {
       if (request.method !== "POST") return errorResponse("method not allowed", 405);
       return this.handleChatCompletions(request);
+    }
+    if (path === "/v1/messages" || path === "/messages") {
+      if (request.method !== "POST") return errorResponse("method not allowed", 405);
+      return this.handleAnthropicMessages(request);
     }
     return errorResponse(`unknown route ${path}`, 404);
   }
@@ -274,6 +299,129 @@ export class SageRouteProxy {
       headers.set("x-sageroute-source", decision.verdict.source);
     }
     return new Response(response.body, { status: response.status, headers });
+  }
+
+  /**
+   * Anthropic Messages clients enter here.
+   *
+   * Claude Code speaks this wire and nothing else, so without this route it cannot
+   * attach at all. The request is translated into the Responses shape, routed by the
+   * same trajectory logic every other client goes through, and translated back. The
+   * router never learns which wire the turn arrived on.
+   *
+   * A non-alias model is still translated rather than proxied verbatim, because the
+   * configured provider for that model may not be Anthropic at all: pointing Claude
+   * Code at a `openai/...` model is the whole point of a universal proxy.
+   */
+  private async handleAnthropicMessages(request: Request): Promise<Response> {
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json() as Record<string, unknown>;
+    } catch {
+      return errorResponse("request body must be valid JSON", 400);
+    }
+
+    const { raw, router } = this.options.config;
+    const stream = body.stream === true;
+    const requested = typeof body.model === "string" ? body.model : "";
+    const translated = anthropicRequestToResponses(body);
+
+    let decision: RouteTurnResult | null = null;
+    let outbound = translated;
+    let target: ResolvedTarget | null;
+    let replyModel = requested;
+
+    if (sageRouteIdFromRawBody(body, { sageRoute: raw.sageRoute })) {
+      decision = await routeTurn(translated, request.headers, router, this.sage);
+
+      if (decision.escalateNotice) {
+        const notice = this.anthropicNotice(decision.escalateNotice, requested, stream);
+        return this.withDecisionHeaders(notice, decision);
+      }
+
+      const restart = decision.session.restartPending;
+      if (restart) decision.session.restartPending = false;
+      outbound = concreteRequestBody(translated, decision.modelRef, restart);
+      target = resolveTarget(decision.modelRef, raw.providers);
+      if (!target) {
+        return errorResponse(`ladder tier "${decision.modelRef}" is not a configured provider`, 500, "api_error");
+      }
+    } else {
+      target = resolveTarget(requested, raw.providers);
+      if (!target) return errorResponse(`unknown model "${requested}"`, 404, "model_not_found");
+      replyModel = requested;
+    }
+
+    const response = await this.send(target, outbound, stream, usage => {
+      if (decision) addTurnCost(decision.session, usage, pricingFor(router, decision.tier));
+    });
+
+    // An upstream failure is already an error envelope; translating it would bury the
+    // message the operator needs inside a synthetic assistant turn.
+    if (!response.ok) {
+      return decision ? this.withDecisionHeaders(response, decision) : response;
+    }
+
+    const translatedBack = stream
+      ? new Response(
+        responsesStreamToAnthropic(response.body ?? emptyStream(), replyModel),
+        { status: 200, headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" } },
+      )
+      : json(responsesToAnthropicReply(await response.json(), replyModel));
+
+    return decision ? this.withDecisionHeaders(translatedBack, decision) : translatedBack;
+  }
+
+  /** Answer a human-escalation verdict on the Anthropic wire. */
+  private anthropicNotice(notice: string, model: string, stream: boolean): Response {
+    if (!stream) {
+      return json({
+        id: `msg_${Date.now().toString(36)}`,
+        type: "message",
+        role: "assistant",
+        model,
+        content: [{ type: "text", text: notice }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      });
+    }
+    const encoder = new TextEncoder();
+    const send = (type: string, payload: Record<string, unknown>): string =>
+      `event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`;
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(send("message_start", {
+          message: {
+            id: `msg_${Date.now().toString(36)}`,
+            type: "message",
+            role: "assistant",
+            model,
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          },
+        })));
+        controller.enqueue(encoder.encode(send("content_block_start", {
+          index: 0, content_block: { type: "text", text: "" },
+        })));
+        controller.enqueue(encoder.encode(send("content_block_delta", {
+          index: 0, delta: { type: "text_delta", text: notice },
+        })));
+        controller.enqueue(encoder.encode(send("content_block_stop", { index: 0 })));
+        controller.enqueue(encoder.encode(send("message_delta", {
+          delta: { stop_reason: "end_turn", stop_sequence: null },
+          usage: { input_tokens: 0, output_tokens: 0 },
+        })));
+        controller.enqueue(encoder.encode(send("message_stop", {})));
+        controller.close();
+      },
+    });
+    return new Response(sse, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+    });
   }
 
   /**

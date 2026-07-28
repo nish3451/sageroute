@@ -1,6 +1,8 @@
 # Architecture
 
-SageRoute is an OpenAI-compatible HTTP proxy with a trajectory-aware routing core. The proxy receives the same request an agent harness was already going to send upstream, recovers the execution trajectory from the `/v1/responses` `input` array, decides whether the current session should stay on the cheap tier or move up the ladder, rewrites the model to a concrete `provider/model`, and dispatches the turn.
+SageRoute is an HTTP proxy with a trajectory-aware routing core. The proxy receives the same request an agent harness was already going to send upstream, recovers the execution trajectory from it, decides whether the current session should stay on the cheap tier or move up the ladder, rewrites the model to a concrete `provider/model`, and dispatches the turn.
+
+Two inbound wires are served, because the coding agents people actually use do not agree on one. Codex and other OpenAI-compatible clients speak the Responses API at `/v1/responses`. Claude Code speaks the Anthropic Messages API at `/v1/messages`. Requests arriving on the Anthropic wire are translated into the Responses shape before routing and translated back on the way out, so the routing core has exactly one input shape to reason about and never learns which client sent a turn.
 
 The important design choice is the boundary between `src/core` and `src/proxy`. `src/core` has no transport imports. It only sees request-shaped data, typed trajectory evidence, derived signal reports, Sage verdicts, and per-session state. That keeps the decision engine independently testable and lets the HTTP server, upstream adapters, auth, config loading, and stream metering stay outside the routing policy.
 
@@ -67,6 +69,8 @@ The ladder is one-way. A session starts on the cheap tier. It can continue, swit
 | `src/cli.ts` | Provides `sageroute serve` and `sageroute check`, config path resolution, port and host overrides, and Bun server startup. | The CLI is deliberately small: validate config in CI with `check`, or boot the proxy with `serve`. |
 
 ## Request And Response Lifecycle
+
+A turn arriving on the Anthropic wire is translated first and then joins this same path. `handleAnthropicMessages()` calls `anthropicRequestToResponses()`, which moves `system` to `instructions`, `max_tokens` to `max_output_tokens`, and lifts `tool_use` and `tool_result` content blocks out of their enclosing messages into top-level `function_call` and `function_call_output` items. That flattening is load-bearing: `extractTrajectory()` pairs calls with outputs by `call_id`, so a tool result left nested inside a user message would be invisible and every Claude Code turn would look like an agent that never ran anything. On the way out, `responsesToAnthropicReply()` or `responsesStreamToAnthropic()` converts the answer back, mapping tool calls to `tool_use` blocks and setting `stop_reason` to `tool_use` so the client actually executes them. Steps 3 through 17 below are identical for both wires.
 
 1. A client sends `POST /v1/responses` with `model` set to the SageRoute alias, which defaults to `sageroute`.
 2. `SageRouteProxy.handle()` normalizes the path, handles `/health`, checks bearer auth if `authToken` resolved to a value, and routes `/v1/responses` to `handleResponses()`.

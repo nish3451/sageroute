@@ -17,7 +17,7 @@
   <img alt="status" src="https://img.shields.io/badge/status-early-orange">
   <img alt="runtime" src="https://img.shields.io/badge/runtime-Bun%201.1%2B-black">
   <img alt="language" src="https://img.shields.io/badge/TypeScript-strict-3178c6">
-  <img alt="tests" src="https://img.shields.io/badge/tests-120%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-154%20passing-brightgreen">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -113,6 +113,59 @@ export OPENAI_MODEL=sageroute
 ```
 
 Nothing else changes. The harness thinks it is talking to one model. It is talking to a ladder.
+
+## Connecting a coding agent
+
+SageRoute accepts the two wire formats real coding agents speak, so the harness you
+already use attaches without a plugin or a patched client. Requests entering on either
+wire are translated into one internal shape, routed by the same trajectory logic, and
+translated back. The client never learns a translation happened.
+
+### Codex CLI
+
+Codex speaks the Responses API, which is SageRoute's native path. Add a provider block to
+`~/.codex/config.toml`:
+
+```toml
+model = "sageroute"
+model_provider = "sageroute"
+
+[model_providers.sageroute]
+name = "SageRoute"
+base_url = "http://127.0.0.1:8787/v1"
+wire_api = "responses"
+```
+
+Codex sends `prompt_cache_key` on every turn, which is a stable per-conversation value,
+so session state lines up exactly with one Codex conversation.
+
+### Claude Code
+
+Claude Code speaks the Anthropic Messages API, which SageRoute serves at `/v1/messages`:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+export ANTHROPIC_MODEL=sageroute
+export ANTHROPIC_API_KEY=unused   # any value; set authToken to require a real one
+claude
+```
+
+Claude Code's tool calls and tool results arrive as content blocks nested inside
+messages. SageRoute lifts them into a flat action sequence before routing, because a tool
+result buried in a user message is invisible to the evidence layer and every turn would
+look like an agent that never ran anything. Its `is_error` flag is carried through as an
+explicit failure signal rather than being re-derived by sniffing output text.
+
+Both harnesses can point at the same running proxy at the same time. Sessions are keyed
+independently, so a Codex conversation and a Claude Code conversation never share a
+ladder or a budget.
+
+### Anything else
+
+Any OpenAI-compatible client works through `/v1/responses` or `/v1/chat/completions`, and
+any Anthropic-compatible client through `/v1/messages`. The routed alias requires
+`/v1/responses` or `/v1/messages`, since those are the two wires that carry the tool-call
+history the router reasons about.
 
 ### Subscription OAuth
 
@@ -252,6 +305,7 @@ And `GET /v1/sageroute/sessions` returns the full decision history per session, 
 | Route | Purpose |
 | --- | --- |
 | `POST /v1/responses` | Main path. Routed when `model` is the alias, passed through otherwise |
+| `POST /v1/messages` | Anthropic Messages wire, for Claude Code. Routed on the alias, translated both ways |
 | `POST /v1/chat/completions` | Passthrough for non-alias models |
 | `GET /v1/models` | The router alias plus every configured `provider/model` |
 | `GET /v1/sageroute/sessions` | Per-session tier, cost, switches, and decision history |
@@ -317,6 +371,8 @@ src/core/     the decision engine, with zero transport imports
 src/proxy/    the OpenAI-compatible server
   config.ts     loading, secret indirection, validation, SSRF guard
   upstream.ts   Responses and Chat Completions adapters, usage metering
+  anthropic.ts  outbound: internal shape -> Anthropic, for talking TO Claude
+  inbound-anthropic.ts  inbound: Anthropic -> internal shape, for Claude Code
   server.ts     routing table, auth, passthrough
 src/cli.ts    serve and check
 ```
@@ -326,7 +382,7 @@ src/cli.ts    serve and check
 ## Testing
 
 ```bash
-bun test tests/      # 74 tests
+bun test tests/      # 154 tests
 bun run typecheck
 ```
 
