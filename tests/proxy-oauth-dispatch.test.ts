@@ -139,6 +139,24 @@ describe("OAuth request shaping", () => {
     expect(input[2]?.call_id).toBe("call_1");
   });
 
+  test("ChatGPT OAuth drops max_output_tokens, which the subscription backend rejects", () => {
+    // Live vendor answers 400 "Unsupported parameter: max_output_tokens". Claude Code
+    // sends max_tokens on every request, so the inbound adapter produces this field on
+    // every turn and without the strip the whole cross-vendor path is dead.
+    const shaped = withoutStoredItemIds({
+      max_output_tokens: 64,
+      input: [{ type: "message", role: "user", content: "hi" }],
+    });
+
+    expect("max_output_tokens" in shaped).toBe(false);
+    expect(shaped.store).toBe(false);
+  });
+
+  test("dropping max_output_tokens does not disturb a body that has none", () => {
+    const shaped = withoutStoredItemIds({ input: [] });
+    expect("max_output_tokens" in shaped).toBe(false);
+  });
+
   test("dispatch strips item ids for a ChatGPT OAuth turn but leaves a keyed turn intact", async () => {
     const responsesRequest = (): UpstreamRequest => ({
       provider: "openai",

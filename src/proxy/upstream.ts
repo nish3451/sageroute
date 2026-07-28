@@ -55,9 +55,16 @@ function normalizeCredential(input: CredentialInput): UpstreamCredential {
  * pinned false. Item ids in `input` then refer to stored objects that were never created
  * and the request 404s, so they are stripped. `call_id` is untouched: it is what pairs a
  * tool call to its output, and the router's evidence layer reads exactly those pairs.
+ *
+ * It also rejects `max_output_tokens` outright with 400 "Unsupported parameter", unlike
+ * the metered API host which accepts it. Found against the live vendor while attaching
+ * Claude Code, whose `max_tokens` translates into exactly that field on every request.
+ * Dropping it costs nothing here: the caller's cap is advisory, and failing the whole
+ * turn to honor it is a worse trade than answering without it.
  */
 export function withoutStoredItemIds(body: Record<string, unknown>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...body, store: false };
+  delete next.max_output_tokens;
   if (!Array.isArray(next.input)) return next;
   next.input = next.input.map(item => {
     if (!isObj(item) || !("id" in item)) return item;
