@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 210" width="640" height="210" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+  <style>
+    .ttl{font-size:14px;fill:#8b949e;letter-spacing:.14em}
+    .k{font-size:13px;fill:#f0883e}
+    .t{font-size:13px;fill:#8b949e}
+    .n{font-size:11px;fill:#6e7681}
+    .box{fill:none;stroke:#30363d;stroke-width:1;rx:3}
+  </style>
+  <text x="20" y="28" class="ttl">TWO NECKS</text>
+
+  <rect x="20" y="52" width="600" height="58" class="box"/>
+  <text x="38" y="78" class="k">first neck</text>
+  <text x="150" y="78" class="t">certify the agent</text>
+  <text x="340" y="78" class="n">once, by a human</text>
+  <text x="480" y="78" class="n">the light switch</text>
+  <text x="38" y="98" class="n">a competence record is judgment, and it happens once per agent, so a person can afford it</text>
+
+  <rect x="20" y="126" width="600" height="58" class="box"/>
+  <text x="38" y="152" class="k">second neck</text>
+  <text x="150" y="152" class="t">gate its output</text>
+  <text x="340" y="152" class="n">every run, forever</text>
+  <text x="480" y="152" class="n">has to be a machine</text>
+  <text x="38" y="172" class="n">an agent that needs you to read every reply is a slower you</text>
+</svg>

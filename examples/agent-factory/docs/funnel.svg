@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" width="640" height="300" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+  <style>
+    .lbl{font-size:13px;fill:#8b949e}
+    .note{font-size:11px;fill:#6e7681}
+    .hi{fill:#f0883e}
+    .bar{fill:#8b949e;opacity:.35}
+    .barhi{fill:#f0883e;opacity:.9}
+    .ttl{font-size:14px;fill:#8b949e;letter-spacing:.14em}
+  </style>
+  <text x="20" y="28" class="ttl">THE FUNNEL</text>
+
+  <text x="20" y="72" class="lbl">tasks in</text>
+  <rect x="170" y="60" width="380" height="16" rx="2" class="bar"/>
+  <text x="562" y="72" class="note">unbounded, cheap</text>
+
+  <text x="20" y="108" class="lbl">generation</text>
+  <rect x="170" y="96" width="300" height="16" rx="2" class="bar"/>
+  <text x="482" y="108" class="note">cheap</text>
+
+  <text x="20" y="144" class="lbl">checks, scans</text>
+  <rect x="170" y="132" width="200" height="16" rx="2" class="bar"/>
+  <text x="382" y="144" class="note">cheap</text>
+
+  <line x1="20" y1="164" x2="620" y2="164" stroke="#30363d" stroke-width="1"/>
+
+  <text x="20" y="192" class="lbl hi">REVIEW</text>
+  <rect x="170" y="180" width="58" height="16" rx="2" class="barhi"/>
+  <text x="240" y="192" class="note hi">bounded by human attention</text>
+
+  <line x1="20" y1="212" x2="620" y2="212" stroke="#30363d" stroke-width="1"/>
+
+  <text x="20" y="240" class="lbl">shipped</text>
+  <rect x="170" y="228" width="58" height="16" rx="2" class="bar"/>
+
+  <text x="20" y="278" class="note">you cannot widen that neck by reading faster</text>
+</svg>

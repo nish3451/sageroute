@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" width="760" height="300" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+  <style>
+    .ttl{font-size:14px;fill:#8b949e;letter-spacing:.14em}
+    .st{font-size:12px;fill:#adbac7}
+    .sub{font-size:10px;fill:#6e7681}
+    .box{fill:none;stroke:#484f58;stroke-width:1}
+    .gate{fill:none;stroke:#f0883e;stroke-width:1.5}
+    .k{font-size:10px;fill:#f0883e}
+    .arr{stroke:#484f58;stroke-width:1;fill:none;marker-end:url(#a)}
+    .dash{stroke:#484f58;stroke-width:1;fill:none;stroke-dasharray:3 3;marker-end:url(#a)}
+  </style>
+  <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M0 0 L8 4 L0 8 z" fill="#484f58"/></marker></defs>
+
+  <text x="20" y="26" class="ttl">THE LINE</text>
+
+  <rect x="20"  y="60" width="126" height="52" rx="3" class="box"/>
+  <text x="32" y="82" class="st">1 spec</text><text x="32" y="99" class="sub">the job card</text>
+
+  <rect x="176" y="60" width="126" height="52" rx="3" class="box"/>
+  <text x="188" y="82" class="st">2 stamp</text><text x="188" y="99" class="sub">from a master</text>
+
+  <rect x="332" y="60" width="126" height="52" rx="3" class="box"/>
+  <text x="344" y="82" class="st">3 prove</text><text x="344" y="99" class="sub">open + sealed</text>
+
+  <rect x="488" y="60" width="126" height="52" rx="3" class="gate"/>
+  <text x="500" y="82" class="st">4 certify</text><text x="500" y="99" class="k">HUMAN GATE</text>
+
+  <rect x="644" y="60" width="96" height="52" rx="3" class="box"/>
+  <text x="656" y="82" class="st">5 operate</text><text x="656" y="99" class="sub">gate + tower</text>
+
+  <path class="arr" d="M146 86 H172"/>
+  <path class="arr" d="M302 86 H328"/>
+  <path class="arr" d="M458 86 H484"/>
+  <path class="arr" d="M614 86 H640"/>
+
+  <path class="dash" d="M692 112 V160 H395"/>
+  <text x="410" y="156" class="sub">failures become the next eval cases</text>
+  <path class="dash" d="M395 160 V112"/>
+
+  <path class="dash" d="M332 190 H239 V112"/>
+  <text x="345" y="194" class="sub">the fix lands in the master, never a variant</text>
+
+  <rect x="20" y="222" width="720" height="46" rx="3" class="box"/>
+  <text x="34" y="244" class="st">the line hires from its own catalog</text>
+  <text x="34" y="260" class="sub">scaffolder · eval-author · red team · optimizer — generation autonomous, certification never</text>
+</svg>

@@ -1,0 +1,5 @@
+{"id": "e-001", "input": {"task": "i filed a chargeback", "output": {"label": "billing", "escalate": false}}, "expect": {"expect": {"label": "billing", "escalate": true}}}
+{"id": "e-002", "input": {"task": "someone signed into my account", "output": {"label": "account", "escalate": false}}, "expect": {"expect": {"label": "account", "escalate": true}}}
+{"id": "e-003", "input": {"task": "your app leaked my email", "output": {"label": "bug", "escalate": false}}, "expect": {"expect": {"label": "bug", "escalate": true}}}
+{"id": "e-004", "input": {"task": "delete my data under gdpr", "output": {"label": "account", "escalate": false}}, "expect": {"expect": {"label": "account", "escalate": true}}, "sealed": true}
+{"id": "e-005", "input": {"task": "refund me now", "output": {"label": "billing", "escalate": false}}, "expect": {"expect": {"label": "billing", "escalate": true}}, "sealed": true}

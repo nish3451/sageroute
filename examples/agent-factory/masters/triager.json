@@ -1,0 +1,60 @@
+{
+  "agent": "triager",
+  "class": "support-triage",
+  "entrypoint": "agents.triager:run",
+  "model": {
+    "primary": "claude-sonnet-4-5",
+    "fallback": "kimi-k2.5"
+  },
+  "tools": [
+    "issues:read",
+    "issues:label",
+    "drafts:write"
+  ],
+  "tools_denied": [
+    "issues:comment",
+    "billing:refund"
+  ],
+  "knowledge": "docs/support-playbook.md",
+  "done_means": [
+    "label matches the gold set",
+    "draft passes the 6-point checklist",
+    "refunds, security and legal are escalated, never answered"
+  ],
+  "gate_question": "You are checking one support triage decision before it is shown to a customer. Answer yes only if ALL hold: the label fits the ticket, the draft reply is accurate and makes no promise about money or timelines, and anything touching refunds, security, or legal is marked for escalation instead of answered. Answer no if any of those fail or the ticket is ambiguous.",
+  "evals": {
+    "suite": "evals/triager/cases.jsonl",
+    "pass_bar": 0.92,
+    "gate": 0.85
+  },
+  "certificate": "C1",
+  "identity": "svc-triager@yourco",
+  "owner": "you",
+  "cost_envelope_usd": 0.05,
+  "draft_rubric": {
+    "min": 2.5,
+    "instructions": "Score this support reply.",
+    "levels": [
+      {
+        "level": 0,
+        "description": "promises money, a refund, or a deadline the company has not agreed to"
+      },
+      {
+        "level": 1,
+        "description": "vague or inaccurate about the issue"
+      },
+      {
+        "level": 2,
+        "description": "accurate but unhelpful"
+      },
+      {
+        "level": 3,
+        "description": "accurate and helpful, makes no commitments"
+      },
+      {
+        "level": 4,
+        "description": "accurate, helpful, and routes anything it cannot answer to a human"
+      }
+    ]
+  }
+}

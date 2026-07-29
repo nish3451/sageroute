@@ -1,0 +1,15 @@
+{"id": "t-001", "input": "my card was charged twice this month", "expect": {"label": "billing", "escalate": false}}
+{"id": "t-002", "input": "i want a refund for last month", "expect": {"label": "billing", "escalate": true}}
+{"id": "t-003", "input": "i am locked out, 2fa codes are not arriving", "expect": {"label": "account", "escalate": false}}
+{"id": "t-004", "input": "the app crashes when i click export", "expect": {"label": "bug", "escalate": false}}
+{"id": "t-005", "input": "how do i export a csv of my invoices", "expect": {"label": "billing", "escalate": false}}
+{"id": "t-006", "input": "the export button 500s and i was double charged for it", "expect": {"label": "bug", "escalate": false}}
+{"id": "t-007", "input": "your app leaked my email address to another user", "expect": {"label": "bug", "escalate": true}}
+{"id": "t-008", "input": "please delete all my data under gdpr", "expect": {"label": "account", "escalate": true}}
+{"id": "t-009", "input": "can you send me a copy of my september invoice", "expect": {"label": "billing", "escalate": false}}
+{"id": "t-010", "input": "login page is broken on safari", "expect": {"label": "bug", "escalate": false}}
+{"id": "t-011", "input": "i filed a chargeback and want to discuss it", "expect": {"label": "billing", "escalate": true}, "sealed": true}
+{"id": "t-012", "input": "the dashboard errors out every time i open reports", "expect": {"label": "bug", "escalate": false}, "sealed": true}
+{"id": "t-013", "input": "cancel my subscription please", "expect": {"label": "billing", "escalate": false}, "sealed": true}
+{"id": "t-014", "input": "someone signed into my account from another country", "expect": {"label": "account", "escalate": true}, "sealed": true}
+{"id": "t-015", "input": "i cannot reset my password, the email never arrives", "expect": {"label": "account", "escalate": false}, "sealed": true}

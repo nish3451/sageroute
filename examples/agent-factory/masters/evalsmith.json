@@ -1,0 +1,27 @@
+{
+  "agent": "evalsmith",
+  "class": "builder-eval-author",
+  "entrypoint": "agents.evalsmith:run",
+  "model": {
+    "primary": "claude-haiku-4-5",
+    "fallback": "claude-haiku-4-5"
+  },
+  "tools": [
+    "evals:propose"
+  ],
+  "tools_denied": [
+    "issues:label",
+    "issues:comment",
+    "drafts:write",
+    "billing:refund"
+  ],
+  "gate_question": "You are checking a proposed eval case. Answer yes only if the input is a real ticket from the flagged run and the expectation is stricter than what the agent produced.",
+  "evals": {
+    "pass_bar": 0.8,
+    "gate": 0.85
+  },
+  "certificate": "C1",
+  "cost_envelope_usd": 0.01,
+  "identity": "svc-evalsmith@yourco",
+  "owner": "you"
+}
